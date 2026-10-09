@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, status_badge %}
+{% block title %}กรอกรวมทุกรายการ {{ period|period }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>กรอกรวมทุกรายการ งวด {{ period|period }}</h1>
+  <form method="get" class="filters">
+    <input type="hidden" name="type" value="{{ unit_type }}">
+    <div class="field"><label>งวดเดือน</label><input type="month" name="period" value="{{ period }}" onchange="this.form.submit()"></div>
+  </form>
+</div>
+<div class="tabs">
+  {% for k, v in UNIT_TYPE_LABELS.items() %}<a href="{{ url_for('admin.sheet', type=k, period=period) }}" class="{{ 'on' if unit_type == k }}">{{ v }} ({{ counts.get(k, 0) }})</a>{% endfor %}
+</div>
+<p class="muted small">เห็นทุกรายการของทุก{{ 'ร้าน' if unit_type == 'shop' else 'ห้อง' }}ในหน้าเดียว — กรอกเลขมิเตอร์ {% if cols|selectattr('kind', 'equalto', 'manual')|list %}ค่าเช่า {% endif %}เบี้ยปรับ และรายการอื่น ๆ แล้วกด
+  <b>บันทึก</b> หรือ <b>บันทึกและออกใบแจ้งหนี้</b> ยอดรวมคำนวณให้ทันทีขณะพิมพ์ · ห้องที่ออกบิลแล้วแก้ได้เฉพาะเบี้ยปรับ</p>
+
+{% if not rows %}
+  <div class="flash info">ยังไม่มี{{ UNIT_TYPE_LABELS[unit_type] }} —
+    <a href="{{ url_for('admin.unit_form', type='shop') if unit_type == 'shop' else url_for('admin.unit_import') }}">เพิ่ม{{ UNIT_TYPE_LABELS[unit_type] }}</a></div>
+{% else %}
+<form method="post" id="sheet-form">
+  {{ csrf() }}<input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="type" value="{{ unit_type }}">
+  <div class="sheet-bar">
+    <div class="field"><label>วันที่จดมิเตอร์</label><input type="date" name="read_date" value="{{ read_date }}"></div>
+    <div class="field"><label>ค้นหา</label><input type="text" id="find" placeholder="เลขห้อง / ชื่อ"></div>
+    <div class="sheet-sum">ยอดรวมทั้งหมด <b id="grand">0.00</b> บาท</div>
+    <div class="actions">
+      <button class="btn" name="action" value="save">บันทึก</button>
+      <button class="btn btn-primary" name="action" value="bill" data-confirm-click="บันทึกและออกใบแจ้งหนี้งวด {{ period|period }} ให้ทุก{{ 'ร้าน' if unit_type == 'shop' else 'ห้อง' }}ที่ยังไม่มีบิล ?">บันทึกและออกใบแจ้งหนี้</button>
+    </div>
+  </div>
+  <div class="card sheet-card"><div class="table-wrap sheet-wrap"><table class="sheet">
+    <thead>
+      <tr>
+        <th class="sticky">{{ 'ร้าน' if unit_type == 'shop' else 'ห้อง' }}</th>
+        {% for col in cols %}{% set ct = col.ct %}
+        <th class="{{ 'num' if col.kind != 'meter' }}">{{ ct.name }}
+          <div class="hint">
+            {%- if col.kind == 'meter' -%}
+              {%- if ct.method == 'meter_rate' %}{{ ct.rate|num }} บ./หน่วย{% if ct.min_charge %} ขั้นต่ำ {{ ct.min_charge|num }}{% endif %}{% else %}ขั้นบันได{% endif -%}
+              {%- if ct.fixed_fee %} +{{ ct.fixed_fee|num }}{% endif %} · ครั้งก่อน / ครั้งนี้
+            {%- elif col.kind == 'manual' %}กรอกเอง (ทุกเดือน)
+            {%- else %}{{ METHOD_LABELS[ct.method] }}{% endif -%}
+          </div>
+        </th>
+        {% endfor %}
+        {% for t in penalty_types %}<th class="num">{{ t }}<div class="hint">กรอกเอง</div></th>{% endfor %}
+        <th>อื่น ๆ<div class="hint">รายละเอียด / จำนวนเงิน</div></th>
+        <th>สถานะ</th>
+        <th class="num sticky-r">รวม (บาท)</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in rows %}{% set u = row.unit %}{% set inv = row.inv %}{% set uid = u.id %}
+      <tr data-find="{{ u.unit_no }} {{ u.owner_name }} {{ u.tenant_name }}" class="{{ 'billed' if inv }}">
+        <td class="sticky"><b>{{ u.unit_no }}</b><div class="who">{{ u.tenant_name or u.owner_name }}</div></td>
+        {% for col in cols %}{% set ct = col.ct %}{% set c = row.cells[ct.id] %}
+          {% if inv %}
+            <td class="num">{% if c %}{{ (c.amount + c.vat_amount)|baht }}{% if c.meter_curr is not none %}<div class="who">{{ c.meter_prev|num }} → {{ c.meter_curr|num }}</div>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+          {% elif col.kind == 'meter' %}
+            <td class="meter" data-method="{{ ct.method }}" data-rate="{{ ct.rate }}" data-min="{{ ct.min_charge }}" data-fee="{{ ct.fixed_fee }}" data-vat="{{ ct.vat_percent }}" data-tiers="{{ ct.tiers }}">
+              {% if c.applies %}
+              <div class="mpair">
+                <input class="cell mprev" type="number" step="0.01" name="prev_{{ ct.id }}_{{ uid }}" value="{{ c.prev|num|replace(',', '') }}" title="เลขครั้งก่อน">
+                <input class="cell mcurr" type="number" step="0.01" name="curr_{{ ct.id }}_{{ uid }}" value="{{ (c.curr|num|replace(',', '')) if c.curr is not none }}" placeholder="ครั้งนี้" title="เลขครั้งนี้">
+              </div>
+              <div class="who"><span class="use"></span> <b class="amt"></b></div>
+              {% else %}<span class="muted">—</span>{% endif %}
+            </td>
+          {% elif col.kind == 'manual' %}
+            <td class="num"><input class="cell money" type="number" step="0.01" min="0" name="amt_{{ ct.id }}_{{ uid }}" value="{{ '%.2f'|format(c.amount) if c.amount }}" data-vat="{{ ct.vat_percent }}"></td>
+          {% else %}
+            <td class="num auto" data-amount="{{ (c.amount * (1 + ct.vat_percent / 100)) if c.applies else 0 }}">{{ c.amount|baht if c.applies else '—' }}</td>
+          {% endif %}
+        {% endfor %}
+        {% for t in penalty_types %}{% set v = row.penalties.get(t) %}
+          <td class="num">{% if not inv or inv.status in ('unpaid', 'partial') %}<input class="cell money pen" type="number" step="0.01" min="0" name="pen_{{ loop.index0 }}_{{ uid }}" value="{{ '%.2f'|format(v) if v }}">{% else %}{{ v|baht if v else '—' }}{% endif %}</td>
+        {% endfor %}
+        <td>{% if inv %}<span class="num-text">{{ row.other.amount|baht if row.other.amount else '—' }}</span>
+            {% else %}<div class="mpair"><input class="cell desc" type="text" name="othd_{{ uid }}" value="{{ row.other.description }}" placeholder="รายการ"><input class="cell money" type="number" step="0.01" name="oth_{{ uid }}" value="{{ '%.2f'|format(row.other.amount) if row.other.amount }}"></div>{% endif %}</td>
+        <td>{% if inv %}<a href="{{ url_for('admin.invoice_detail', invoice_id=inv.id) }}">{{ status_badge(inv.status) }}</a>
+            {% elif row.missing %}<span class="badge partial" title="{{ row.missing|join(', ') }}">รอจดมิเตอร์</span>
+            {% else %}<span class="badge off">ยังไม่ออกบิล</span>{% endif %}</td>
+        <td class="num total sticky-r" data-billed="{{ row.total if inv else '' }}"><b>{{ row.total|baht }}</b></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div></div>
+  <div class="actions">
+    <button class="btn" name="action" value="save">บันทึก</button>
+    <button class="btn btn-primary" name="action" value="bill" data-confirm-click="บันทึกและออกใบแจ้งหนี้งวด {{ period|period }} ?">บันทึกและออกใบแจ้งหนี้</button>
+  </div>
+</form>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var form = document.getElementById('sheet-form');
+  if (!form) return;
+  function num(v) { v = parseFloat(v); return isNaN(v) ? 0 : v; }
+  function fmt(v) { return v.toLocaleString('th-TH', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+  function tiered(usage, tiers) {
+    tiers = tiers.slice().sort(function (a, b) { return (a.upto == null ? Infinity : a.upto) - (b.upto == null ? Infinity : b.upto); });
+    var total = 0, lower = 0;
+    for (var i = 0; i < tiers.length; i++) {
+      var up = tiers[i].upto, last = i === tiers.length - 1;
+      var top = (up == null || last) ? usage : Math.min(usage, up);
+      if (top - lower <= 0) break;
+      total += (top - lower) * tiers[i].rate;
+      if (up == null || usage <= up) break;
+      lower = up;
+    }
+    return total;
+  }
+  function meterAmount(td) {
+    var prev = td.querySelector('.mprev'), curr = td.querySelector('.mcurr');
+    if (!curr || curr.value === '') { td.querySelector('.use') && (td.querySelector('.use').textContent = ''); if (td.querySelector('.amt')) td.querySelector('.amt').textContent = ''; return 0; }
+    var usage = Math.max(num(curr.value) - num(prev.value), 0), d = td.dataset, amt;
+    if (d.method === 'meter_tiered') {
+      var tiers = []; try { tiers = JSON.parse(d.tiers || '[]'); } catch (e) {}
+      amt = tiered(usage, tiers.map(function (t) { return {upto: t.upto == null ? null : num(t.upto), rate: num(t.rate)}; }));
+    } else { amt = usage * num(d.rate); }
+    amt += num(d.fee);
+    if (num(d.min) && amt < num(d.min)) amt = num(d.min);
+    amt = Math.round(amt * 100) / 100;
+    td.querySelector('.use').textContent = 'ใช้ ' + usage.toLocaleString('th-TH') + ' →';
+    td.querySelector('.amt').textContent = fmt(amt);
+    return amt * (1 + num(d.vat) / 100);
+  }
+  function rowTotal(tr) {
+    var cell = tr.querySelector('.total');
+    if (cell.dataset.billed !== '') {
+      var t = num(cell.dataset.billed);
+      return t;
+    }
+    var sum = 0;
+    tr.querySelectorAll('td.auto').forEach(function (td) { sum += num(td.dataset.amount); });
+    tr.querySelectorAll('td.meter').forEach(function (td) { sum += meterAmount(td); });
+    tr.querySelectorAll('input.money').forEach(function (i) { sum += num(i.value) * (1 + num(i.dataset.vat) / 100); });
+    cell.innerHTML = '<b>' + fmt(sum) + '</b>';
+    return sum;
+  }
+  function grand() {
+    var g = 0;
+    form.querySelectorAll('tbody tr').forEach(function (tr) { g += rowTotal(tr); });
+    document.getElementById('grand').textContent = fmt(g);
+  }
+  form.addEventListener('input', function (e) {
+    var tr = e.target.closest('tr');
+    if (tr) rowTotal(tr);
+    var g = 0;
+    form.querySelectorAll('tbody tr').forEach(function (r) {
+      var c = r.querySelector('.total'); g += c.dataset.billed !== '' ? num(c.dataset.billed) : num(c.textContent.replace(/,/g, ''));
+    });
+    document.getElementById('grand').textContent = fmt(g);
+  });
+  // Enter = ลงไปช่องเดียวกันของแถวถัดไป (จดมิเตอร์ได้เร็ว)
+  form.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
+    e.preventDefault();
+    var td = e.target.closest('td'), tr = td.parentNode, idx = Array.prototype.indexOf.call(tr.children, td);
+    var cls = e.target.classList.contains('mprev') ? '.mprev' : e.target.classList.contains('desc') ? '.desc' : e.target.classList.contains('mcurr') ? '.mcurr' : 'input.money';
+    for (var next = tr.nextElementSibling; next; next = next.nextElementSibling) {
+      if (next.style.display === 'none') continue;
+      var target = next.children[idx] && next.children[idx].querySelector(cls);
+      if (target) { target.focus(); target.select && target.select(); break; }
+    }
+  });
+  form.querySelectorAll('[data-confirm-click]').forEach(function (b) {
+    b.addEventListener('click', function (e) { if (!confirm(b.dataset.confirmClick)) e.preventDefault(); });
+  });
+  document.getElementById('find').addEventListener('input', function () {
+    var q = this.value.trim().toLowerCase();
+    form.querySelectorAll('tbody tr').forEach(function (tr) { tr.style.display = !q || tr.dataset.find.toLowerCase().indexOf(q) >= 0 ? '' : 'none'; });
+  });
+  grand();
+})();
+</script>
+{% endblock %}

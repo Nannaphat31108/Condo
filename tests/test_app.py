@@ -50,15 +50,24 @@ def test_fixed_per_area_vat_and_override():
 
 
 def test_charge_applies_frequency_and_window():
-    row = dict(active=1, start_period=None, end_period=None, frequency="monthly", bill_month=None, apply_to="all")
-    assert billing.charge_applies(row, "2026-05", 1, {})
-    assert not billing.charge_applies({**row, "frequency": "yearly", "bill_month": 1}, "2026-05", 1, {})
-    assert billing.charge_applies({**row, "frequency": "yearly", "bill_month": 5}, "2026-05", 1, {})
-    assert billing.charge_applies({**row, "frequency": "once", "start_period": "2026-05"}, "2026-05", 1, {})
-    assert not billing.charge_applies({**row, "frequency": "once", "start_period": "2026-05"}, "2026-06", 1, {})
-    assert not billing.charge_applies({**row, "end_period": "2026-04"}, "2026-05", 1, {})
-    assert not billing.charge_applies({**row, "apply_to": "selected"}, "2026-05", 1, {2: None})
-    assert billing.charge_applies({**row, "apply_to": "selected"}, "2026-05", 2, {2: None})
+    row = dict(active=1, start_period=None, end_period=None, frequency="monthly", bill_month=None, apply_to="all",
+               unit_type="all", manual_amount=0)
+    room, shop = {"id": 1, "unit_type": "room"}, {"id": 2, "unit_type": "shop"}
+    assert billing.charge_applies(row, "2026-05", room, {})
+    assert not billing.charge_applies({**row, "frequency": "yearly", "bill_month": 1}, "2026-05", room, {})
+    assert billing.charge_applies({**row, "frequency": "yearly", "bill_month": 5}, "2026-05", room, {})
+    assert billing.charge_applies({**row, "frequency": "once", "start_period": "2026-05"}, "2026-05", room, {})
+    assert not billing.charge_applies({**row, "frequency": "once", "start_period": "2026-05"}, "2026-06", room, {})
+    assert not billing.charge_applies({**row, "end_period": "2026-04"}, "2026-05", room, {})
+    assert not billing.charge_applies({**row, "apply_to": "selected"}, "2026-05", room, {2: None})
+    assert billing.charge_applies({**row, "apply_to": "selected"}, "2026-05", shop, {2: None})
+    # แยกห้องชุด / ร้านค้า
+    assert not billing.charge_applies({**row, "unit_type": "shop"}, "2026-05", room, {})
+    assert billing.charge_applies({**row, "unit_type": "shop"}, "2026-05", shop, {})
+    # กรอกยอดเองรายห้อง: เก็บเฉพาะห้องที่กรอกยอด
+    rent = {**row, "unit_type": "shop", "manual_amount": 1}
+    assert not billing.charge_applies(rent, "2026-05", shop, {})
+    assert billing.charge_applies(rent, "2026-05", shop, {2: 3500})
 
 
 def test_bahttext_and_numbering_helpers():
@@ -396,3 +405,54 @@ def test_bulk_delete_room_range(app, client):
         assert db.execute("SELECT COUNT(*) FROM units WHERE unit_no LIKE '26/%'").fetchone()[0] == 198
         assert db.execute("SELECT COUNT(*) FROM invoices WHERE unit_id=?", (test_unit,)).fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM invoices").fetchone()[0] == 198
+
+
+def test_shop_charges_and_all_in_one_sheet(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/new", {"unit_no": "26/1", "unit_type": "room", "active": "1"})
+    s.post("/admin/units/new", {"unit_no": "ร้าน 1", "unit_type": "shop", "tenant_name": "ร้านกาแฟ", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        ids = {r["unit_no"]: r["id"] for r in db.execute("SELECT * FROM units")}
+        cts = {r["name"]: r for r in db.execute("SELECT * FROM charge_types")}
+        # ห้องชุดไม่จดไฟในงวดนี้: ปิดค่าไฟห้องชุดไว้
+        db.execute("UPDATE charge_types SET active=0 WHERE name='ค่าไฟฟ้า'")
+        db.commit()
+    assert cts["ค่าน้ำประปา"]["unit_type"] == "room" and cts["ค่าน้ำประปา (ร้านค้า)"]["unit_type"] == "shop"
+    room, shop = ids["26/1"], ids["ร้าน 1"]
+    w_room, w_shop, e_shop, rent = (cts[n]["id"] for n in ("ค่าน้ำประปา", "ค่าน้ำประปา (ร้านค้า)",
+                                                          "ค่าไฟฟ้า (ร้านค้า)", "ค่าเช่าพื้นที่"))
+    # หน้ากรอกรวม: ห้องชุด
+    page = client.get("/admin/sheet?period=2026-10&type=room").get_data(as_text=True)
+    assert "ค่าส่วนกลาง" in page and "ค่าเช่าพื้นที่" not in page and "ร้าน 1" not in page
+    s.post("/admin/sheet", {"period": "2026-10", "type": "room", "read_date": "2026-10-08",
+                            f"prev_{w_room}_{room}": "100", f"curr_{w_room}_{room}": "103",
+                            f"pen_1_{room}": "40", f"othd_{room}": "ค่าซ่อมก๊อก", f"oth_{room}": "150",
+                            "action": "bill"})
+    # หน้ากรอกรวม: ร้านค้า
+    page = client.get("/admin/sheet?period=2026-10&type=shop").get_data(as_text=True)
+    assert "ค่าเช่าพื้นที่" in page and "ค่ารักษามิเตอร์" in page and "ค่าส่วนกลาง" not in page
+    s.post("/admin/sheet", {"period": "2026-10", "type": "shop", "read_date": "2026-10-08",
+                            f"prev_{w_shop}_{shop}": "50", f"curr_{w_shop}_{shop}": "60",
+                            f"prev_{e_shop}_{shop}": "1000", f"curr_{e_shop}_{shop}": "1200",
+                            f"amt_{rent}_{shop}": "3500", "action": "bill"})
+    with app.app_context():
+        db = get_db()
+        inv = {r["unit_no"]: r for r in db.execute("SELECT * FROM invoices")}
+        # ห้อง: น้ำ 3 หน่วย เหมาจ่าย 65 + ส่วนกลาง 250 + ขยะ 20 + ประกัน 10 + เบี้ยปรับค่าน้ำ 40 + ค่าซ่อม 150
+        assert inv["26/1"]["total"] == 65 + 250 + 20 + 10 + 40 + 150
+        pen = db.execute("SELECT kind FROM invoice_items WHERE invoice_id=? AND description='เบี้ยปรับค่าน้ำ'",
+                         (inv["26/1"]["id"],)).fetchone()
+        assert pen["kind"] == "penalty"
+        # ร้าน: เช่า 3500 + น้ำ 10×18 + รักษามิเตอร์ 25 + ไฟ 200×8
+        assert inv["ร้าน 1"]["total"] == 3500 + 180 + 25 + 1600
+        assert inv["ร้าน 1"]["tenant_name"] == "ร้านกาแฟ"
+    # ค่าเช่าจำไว้ใช้เดือนถัดไป, เบี้ยปรับแก้ได้หลังออกบิล
+    page = client.get("/admin/sheet?period=2026-11&type=shop").get_data(as_text=True)
+    assert 'value="3500.00"' in page
+    s.post("/admin/sheet", {"period": "2026-10", "type": "room", f"pen_0_{room}": "100", f"pen_1_{room}": "40"})
+    with app.app_context():
+        assert get_db().execute("SELECT total FROM invoices WHERE unit_no='26/1'").fetchone()[0] == 535 + 100
+    page = client.get(f"/admin/invoices/{inv['ร้าน 1']['id']}").get_data(as_text=True)
+    assert "ร้านค้า" in page and "ค่ารักษามิเตอร์" in page

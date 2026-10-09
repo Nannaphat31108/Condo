@@ -75,12 +75,14 @@ def dashboard():
 
 
 # ---------------------------------------------------------------- units
-UNIT_FIELDS = ("unit_no", "building", "floor", "area_sqm", "owner_name", "phone", "tenant_name", "tenant_phone", "note")
+UNIT_FIELDS = ("unit_no", "unit_type", "building", "floor", "area_sqm", "owner_name", "phone", "tenant_name",
+               "tenant_phone", "note")
 
 
 def unit_form_data():
     data = {f: request.form.get(f, "").strip() for f in UNIT_FIELDS}
     data["area_sqm"] = to_float(data["area_sqm"])
+    data["unit_type"] = data["unit_type"] if data["unit_type"] in billing.UNIT_TYPE_LABELS else "room"
     data["active"] = 1 if request.form.get("active") else 0
     return data
 
@@ -89,16 +91,22 @@ def unit_form_data():
 @admin_required
 def units():
     q = request.args.get("q", "").strip()
+    unit_type = request.args.get("type", "")
     sql = ("SELECT u.*, (SELECT COALESCE(SUM(total-paid_amount),0) FROM invoices i WHERE i.unit_id=u.id"
            " AND i.status IN ('unpaid','partial')) AS outstanding,"
-           " (SELECT GROUP_CONCAT(username, ', ') FROM users WHERE unit_id=u.id) AS usernames FROM units u")
+           " (SELECT GROUP_CONCAT(username, ', ') FROM users WHERE unit_id=u.id) AS usernames FROM units u WHERE 1=1")
     params = []
+    if unit_type in billing.UNIT_TYPE_LABELS:
+        sql += " AND u.unit_type=?"
+        params.append(unit_type)
     if q:
-        sql += (" WHERE u.unit_no LIKE ? OR u.owner_name LIKE ? OR u.phone LIKE ?"
-                " OR u.tenant_name LIKE ? OR u.tenant_phone LIKE ?")
-        params = [f"%{q}%"] * 5
-    rows = get_db().execute(sql + " ORDER BY u.active DESC, length(u.unit_no), u.unit_no", params).fetchall()
-    return render_template("admin/units.html", units=rows, q=q)
+        sql += (" AND (u.unit_no LIKE ? OR u.owner_name LIKE ? OR u.phone LIKE ?"
+                " OR u.tenant_name LIKE ? OR u.tenant_phone LIKE ?)")
+        params += [f"%{q}%"] * 5
+    rows = get_db().execute(sql + " ORDER BY u.active DESC, u.unit_type, length(u.unit_no), u.unit_no",
+                            params).fetchall()
+    counts = dict(get_db().execute("SELECT unit_type, COUNT(*) FROM units GROUP BY unit_type").fetchall())
+    return render_template("admin/units.html", units=rows, q=q, unit_type=unit_type, counts=counts)
 
 
 @bp.route("/units/new", methods=("GET", "POST"))
@@ -115,15 +123,15 @@ def unit_form(unit_id=None):
             try:
                 if unit:
                     db.execute(
-                        "UPDATE units SET unit_no=?, building=?, floor=?, area_sqm=?, owner_name=?, phone=?,"
+                        "UPDATE units SET unit_no=?, unit_type=?, building=?, floor=?, area_sqm=?, owner_name=?, phone=?,"
                         " tenant_name=?, tenant_phone=?, note=?, active=? WHERE id=?",
                         (*[data[f] for f in UNIT_FIELDS], data["active"], unit_id),
                     )
                     log_activity(g.user, f"แก้ไขห้อง {data['unit_no']}")
                 else:
                     db.execute(
-                        "INSERT INTO units (unit_no, building, floor, area_sqm, owner_name, phone, tenant_name,"
-                        " tenant_phone, note, active) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        "INSERT INTO units (unit_no, unit_type, building, floor, area_sqm, owner_name, phone, tenant_name,"
+                        " tenant_phone, note, active) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                         (*[data[f] for f in UNIT_FIELDS], data["active"]),
                     )
                     log_activity(g.user, f"เพิ่มห้อง {data['unit_no']}")
@@ -133,6 +141,8 @@ def unit_form(unit_id=None):
             except sqlite3.IntegrityError:
                 flash("เลขห้องนี้มีอยู่แล้ว", "error")
         unit = {**(dict(unit) if unit else {}), **data}
+    if unit is None and request.args.get("type") == "shop":
+        unit = {"unit_type": "shop", "active": 1}
     return render_template("admin/unit_form.html", unit=unit, unit_id=unit_id)
 
 
@@ -428,6 +438,8 @@ def charge_form(charge_id=None):
             "start_period": f.get("start_period") if valid_period(f.get("start_period")) else None,
             "end_period": f.get("end_period") if valid_period(f.get("end_period")) else None,
             "apply_to": "selected" if f.get("apply_to") == "selected" else "all",
+            "unit_type": f.get("unit_type") if f.get("unit_type") in billing.CHARGE_UNIT_TYPE_LABELS else "all",
+            "manual_amount": 1 if f.get("manual_amount") else 0,
             "sort_order": f.get("sort_order", type=int) or 0,
             "active": 1 if f.get("active") else 0,
         }
@@ -506,6 +518,51 @@ def charge_preview():
 
 
 # ---------------------------------------------------------------- meter readings
+def save_reading(db, ct, unit, period, prev_raw, curr_raw, read_date, reset=False):
+    """บันทึกเลขมิเตอร์ 1 รายการ คืน True = บันทึก, None = ไม่มีอะไรเปลี่ยน, ข้อความ = ผิดพลาด"""
+    prev_raw, curr_raw = str(prev_raw or "").strip(), str(curr_raw or "").strip()
+    if curr_raw == "":
+        return None
+    prev, curr = to_float(prev_raw), to_float(curr_raw)
+    if curr < prev and not reset:
+        return f"{unit['unit_no']} {ct['name']}: เลขครั้งนี้ ({curr_raw}) น้อยกว่าเลขครั้งก่อน ({prev_raw})"
+    if curr < prev:  # มิเตอร์วนรอบ/เปลี่ยนมิเตอร์ใหม่: ถือว่าเริ่มนับจาก 0
+        prev = 0
+    invoiced = db.execute("SELECT invoice_no FROM invoices WHERE unit_id=? AND period=? AND status!='void'",
+                          (unit["id"], period)).fetchone()
+    existing = db.execute("SELECT * FROM meter_readings WHERE charge_type_id=? AND unit_id=? AND period=?",
+                          (ct["id"], unit["id"], period)).fetchone()
+    if existing and (existing["prev_reading"], existing["curr_reading"]) == (prev, curr):
+        return None
+    if invoiced:
+        return (f"{unit['unit_no']} {ct['name']}: ออกบิล {invoiced['invoice_no']} ไปแล้ว"
+                " ต้องยกเลิกบิลก่อนจึงแก้เลขมิเตอร์ได้")
+    db.execute(
+        "INSERT INTO meter_readings (charge_type_id, unit_id, period, prev_reading, curr_reading, read_date)"
+        " VALUES (?,?,?,?,?,?) ON CONFLICT (charge_type_id, unit_id, period) DO UPDATE SET"
+        " prev_reading=excluded.prev_reading, curr_reading=excluded.curr_reading,"
+        " read_date=excluded.read_date, recorded_at=datetime('now','localtime')",
+        (ct["id"], unit["id"], period, prev, curr, read_date),
+    )
+    return True
+
+
+def last_readings(db, ct_id, period):
+    """เลขมิเตอร์ล่าสุดก่อนงวดนี้ของทุกห้อง {unit_id: curr_reading}"""
+    return {r["unit_id"]: r["curr_reading"] for r in db.execute(
+        "SELECT m.unit_id, m.curr_reading FROM meter_readings m WHERE m.charge_type_id=? AND m.period=("
+        " SELECT MAX(period) FROM meter_readings x WHERE x.charge_type_id=m.charge_type_id"
+        " AND x.unit_id=m.unit_id AND x.period<?)", (ct_id, period))}
+
+
+def units_for_charge(db, ct):
+    sql = "SELECT * FROM units WHERE active=1"
+    params = []
+    if ct["unit_type"] in ("room", "shop"):
+        sql += " AND unit_type=?"
+        params.append(ct["unit_type"])
+    return db.execute(sql + " ORDER BY length(unit_no), unit_no", params).fetchall()
+
 @bp.route("/meters", methods=("GET", "POST"))
 @admin_required
 def meters():
@@ -519,43 +576,19 @@ def meters():
     period = get_period_arg()
     ct_id = request.values.get("charge_type_id", type=int) or meter_types[0]["id"]
     ct = next((m for m in meter_types if m["id"] == ct_id), meter_types[0])
-    units_list = db.execute("SELECT * FROM units WHERE active=1 ORDER BY length(unit_no), unit_no").fetchall()
+    units_list = units_for_charge(db, ct)
 
     if request.method == "POST":
         errors, saved = [], 0
         read_date = request.form.get("read_date") or date.today().isoformat()
         for unit in units_list:
-            prev_raw = request.form.get(f"prev_{unit['id']}", "").strip()
-            curr_raw = request.form.get(f"curr_{unit['id']}", "").strip()
-            if curr_raw == "":
-                continue
-            prev, curr = to_float(prev_raw), to_float(curr_raw)
-            if curr < prev and not request.form.get(f"reset_{unit['id']}"):
-                errors.append(f"ห้อง {unit['unit_no']}: เลขปัจจุบัน ({curr_raw}) น้อยกว่าเลขครั้งก่อน ({prev_raw})")
-                continue
-            if curr < prev:  # มิเตอร์วนรอบ/เปลี่ยนมิเตอร์ใหม่: ถือว่าเริ่มนับจาก 0
-                prev = 0
-            invoiced = db.execute(
-                "SELECT invoice_no FROM invoices WHERE unit_id=? AND period=? AND status!='void'",
-                (unit["id"], period),
-            ).fetchone()
-            existing = db.execute(
-                "SELECT * FROM meter_readings WHERE charge_type_id=? AND unit_id=? AND period=?",
-                (ct["id"], unit["id"], period),
-            ).fetchone()
-            if invoiced and existing:
-                if (existing["prev_reading"], existing["curr_reading"]) != (prev, curr):
-                    errors.append(f"ห้อง {unit['unit_no']}: ออกบิล {invoiced['invoice_no']} ไปแล้ว"
-                                  " ต้องยกเลิกบิลก่อนจึงแก้เลขมิเตอร์ได้")
-                continue
-            db.execute(
-                "INSERT INTO meter_readings (charge_type_id, unit_id, period, prev_reading, curr_reading, read_date)"
-                " VALUES (?,?,?,?,?,?) ON CONFLICT (charge_type_id, unit_id, period) DO UPDATE SET"
-                " prev_reading=excluded.prev_reading, curr_reading=excluded.curr_reading,"
-                " read_date=excluded.read_date, recorded_at=datetime('now','localtime')",
-                (ct["id"], unit["id"], period, prev, curr, read_date),
-            )
-            saved += 1
+            result = save_reading(db, ct, unit, period, request.form.get(f"prev_{unit['id']}", ""),
+                                  request.form.get(f"curr_{unit['id']}", ""), read_date,
+                                  bool(request.form.get(f"reset_{unit['id']}")))
+            if result is True:
+                saved += 1
+            elif result:
+                errors.append(result)
         log_activity(g.user, f"บันทึกมิเตอร์ {ct['name']} งวด {period} จำนวน {saved} ห้อง")
         db.commit()
         for e in errors:
@@ -566,11 +599,7 @@ def meters():
     current = {r["unit_id"]: r for r in db.execute(
         "SELECT * FROM meter_readings WHERE charge_type_id=? AND period=?", (ct["id"], period))}
     # เลขครั้งก่อน = เลขปัจจุบันของงวดล่าสุดก่อนหน้า
-    last = {r["unit_id"]: r["curr_reading"] for r in db.execute(
-        "SELECT m.unit_id, m.curr_reading FROM meter_readings m WHERE m.charge_type_id=? AND m.period=("
-        " SELECT MAX(period) FROM meter_readings x WHERE x.charge_type_id=m.charge_type_id"
-        " AND x.unit_id=m.unit_id AND x.period<?)",
-        (ct["id"], period))}
+    last = last_readings(db, ct["id"], period)
     invoiced = {r["unit_id"] for r in db.execute(
         "SELECT unit_id FROM invoices WHERE period=? AND status!='void'", (period,))}
     rows = []
@@ -629,6 +658,186 @@ def adhoc_delete(adhoc_id):
     return redirect(url_for("admin.adhoc"))
 
 
+# ---------------------------------------------------------------- กรอกรวมทุกรายการ (หน้าเดียว)
+def sheet_columns(db, unit_type):
+    charge_types = db.execute(
+        "SELECT * FROM charge_types WHERE active=1 AND unit_type IN ('all', ?) ORDER BY sort_order, id", (unit_type,)
+    ).fetchall()
+    cols = []
+    for ct in charge_types:
+        if ct["method"] in billing.METER_METHODS:
+            kind = "meter"
+        elif ct["manual_amount"]:
+            kind = "manual"
+        else:
+            kind = "auto"
+        cols.append({"ct": ct, "kind": kind})
+    return cols
+
+
+def upsert_adhoc(db, unit_id, period, kind, description, amount):
+    """รายการที่ยังไม่ออกบิล (เบี้ยปรับ / อื่น ๆ) จากหน้ากรอกรวม: 0 หรือว่าง = ลบ"""
+    if kind == "penalty":
+        row = db.execute("SELECT id FROM adhoc_charges WHERE unit_id=? AND period=? AND kind='penalty' AND description=?"
+                         " AND invoice_id IS NULL", (unit_id, period, description)).fetchone()
+    else:
+        row = db.execute("SELECT id FROM adhoc_charges WHERE unit_id=? AND period=? AND kind=? AND invoice_id IS NULL",
+                         (unit_id, period, kind)).fetchone()
+    if not amount:
+        if row:
+            db.execute("DELETE FROM adhoc_charges WHERE id=?", (row["id"],))
+    elif row:
+        db.execute("UPDATE adhoc_charges SET amount=?, description=? WHERE id=?", (amount, description, row["id"]))
+    else:
+        db.execute("INSERT INTO adhoc_charges (unit_id, period, description, amount, kind) VALUES (?,?,?,?,?)",
+                   (unit_id, period, description, amount, kind))
+
+
+@bp.route("/sheet", methods=("GET", "POST"))
+@admin_required
+def sheet():
+    db = get_db()
+    period = get_period_arg()
+    unit_type = request.values.get("type") if request.values.get("type") in billing.UNIT_TYPE_LABELS else "room"
+    cols = sheet_columns(db, unit_type)
+    penalty_types = penalty_type_list()
+    units_ = db.execute("SELECT * FROM units WHERE active=1 AND unit_type=? ORDER BY length(unit_no), unit_no",
+                        (unit_type,)).fetchall()
+    invoices_ = {r["unit_id"]: r for r in db.execute(
+        "SELECT * FROM invoices WHERE period=? AND status!='void'", (period,))}
+    selections = billing.load_selections(db)
+
+    if request.method == "POST":
+        f = request.form
+        read_date = f.get("read_date") or date.today().isoformat()
+        errors, changed = [], 0
+        for unit in units_:
+            uid = unit["id"]
+            inv = invoices_.get(uid)
+            if inv:
+                # ออกบิลแล้ว: แก้ได้เฉพาะเบี้ยปรับ (ถ้ายังไม่ชำระครบ)
+                if billing.invoice_editable(inv):
+                    for idx, name in enumerate(penalty_types):
+                        raw = f.get(f"pen_{idx}_{uid}")
+                        if raw is not None and billing.set_penalty(db, inv["id"], name, to_float(raw)):
+                            changed += 1
+                continue
+            for col in cols:
+                ct = col["ct"]
+                if col["kind"] == "meter":
+                    result = save_reading(db, ct, unit, period, f.get(f"prev_{ct['id']}_{uid}"),
+                                          f.get(f"curr_{ct['id']}_{uid}"), read_date)
+                    if result is True:
+                        changed += 1
+                    elif result:
+                        errors.append(result)
+                elif col["kind"] == "manual":
+                    raw = f.get(f"amt_{ct['id']}_{uid}")
+                    if raw is None:
+                        continue
+                    amount = billing.money(to_float(raw))
+                    current = selections.get(ct["id"], {}).get(uid)
+                    if (current or 0) == amount:
+                        continue
+                    if amount:
+                        db.execute("INSERT INTO charge_type_units (charge_type_id, unit_id, amount_override) VALUES (?,?,?)"
+                                   " ON CONFLICT (charge_type_id, unit_id) DO UPDATE SET amount_override=excluded.amount_override",
+                                   (ct["id"], uid, amount))
+                    else:
+                        db.execute("DELETE FROM charge_type_units WHERE charge_type_id=? AND unit_id=?", (ct["id"], uid))
+                    changed += 1
+            for idx, name in enumerate(penalty_types):
+                raw = f.get(f"pen_{idx}_{uid}")
+                if raw is not None:
+                    upsert_adhoc(db, uid, period, "penalty", name, billing.money(to_float(raw)))
+            raw = f.get(f"oth_{uid}")
+            if raw is not None:
+                upsert_adhoc(db, uid, period, "other", f.get(f"othd_{uid}", "").strip() or "อื่น ๆ",
+                             billing.money(to_float(raw)))
+        log_activity(g.user, f"กรอกรวม {billing.UNIT_TYPE_LABELS[unit_type]} งวด {period}")
+        db.commit()
+        for e in errors[:20]:
+            flash(e, "error")
+        if f.get("action") == "bill":
+            result = billing.generate_invoices(db, period, get_settings(), unit_ids=[u["id"] for u in units_])
+            log_activity(g.user, f"ออกใบแจ้งหนี้งวด {period} จำนวน {len(result['created'])} ฉบับ (จากหน้ากรอกรวม)")
+            db.commit()
+            flash(f"บันทึกแล้ว และออกใบแจ้งหนี้ใหม่ {len(result['created'])} ฉบับ", "success")
+            if result["missing_meter"]:
+                flash(f"ยังไม่ออกบิล {len(result['missing_meter'])} รายการ เพราะยังไม่จดมิเตอร์: "
+                      + ", ".join(result["missing_meter"][:30]), "error")
+        else:
+            flash("บันทึกข้อมูลเรียบร้อย", "success")
+        return redirect(url_for("admin.sheet", period=period, type=unit_type))
+
+    # ---- เตรียมข้อมูลแสดงผล
+    readings = {}
+    for col in cols:
+        if col["kind"] == "meter":
+            ct_id = col["ct"]["id"]
+            readings[ct_id] = {
+                "current": {r["unit_id"]: r for r in db.execute(
+                    "SELECT * FROM meter_readings WHERE charge_type_id=? AND period=?", (ct_id, period))},
+                "last": last_readings(db, ct_id, period),
+            }
+    pending = {}
+    for a in db.execute("SELECT * FROM adhoc_charges WHERE period=? AND invoice_id IS NULL", (period,)):
+        key = (a["unit_id"], a["description"]) if a["kind"] == "penalty" else (a["unit_id"], a["kind"])
+        pending[key] = a
+    all_cts = db.execute("SELECT * FROM charge_types ORDER BY sort_order, id").fetchall()
+    rows = []
+    for unit in units_:
+        uid = unit["id"]
+        inv = invoices_.get(uid)
+        row = {"unit": unit, "inv": inv, "cells": {}, "penalties": {}, "other": None}
+        if inv:
+            items = db.execute("SELECT * FROM invoice_items WHERE invoice_id=?", (inv["id"],)).fetchall()
+            by_ct = {}
+            for it in items:
+                if it["charge_type_id"]:
+                    by_ct[it["charge_type_id"]] = it
+                elif it["kind"] == "penalty":
+                    row["penalties"][it["description"]] = it["amount"]
+            other = sum(it["amount"] for it in items if not it["charge_type_id"] and it["kind"] != "penalty")
+            row["other"] = {"amount": other}
+            for col in cols:
+                row["cells"][col["ct"]["id"]] = by_ct.get(col["ct"]["id"])
+            row["total"] = inv["total"]
+        else:
+            for col in cols:
+                ct = col["ct"]
+                sel = selections.get(ct["id"], {})
+                if col["kind"] == "meter":
+                    r = readings[ct["id"]]
+                    cur = r["current"].get(uid)
+                    applies = billing.charge_applies(ct, period, unit, sel)
+                    row["cells"][ct["id"]] = {
+                        "applies": applies,
+                        "prev": cur["prev_reading"] if cur else r["last"].get(uid, 0),
+                        "curr": cur["curr_reading"] if cur else None,
+                    }
+                elif col["kind"] == "manual":
+                    row["cells"][ct["id"]] = {"applies": True, "amount": sel.get(uid)}
+                else:
+                    applies = billing.charge_applies(ct, period, unit, sel)
+                    amount = billing.compute_item(ct, unit, None, sel.get(uid))["amount"] if applies else None
+                    row["cells"][ct["id"]] = {"applies": applies, "amount": amount}
+            for name in penalty_types:
+                a = pending.get((uid, name))
+                row["penalties"][name] = a["amount"] if a else None
+            a = pending.get((uid, "other"))
+            row["other"] = {"amount": a["amount"] if a else None, "description": a["description"] if a else ""}
+            items, missing, _ = billing.build_unit_items(db, unit, period, all_cts, selections)
+            row["total"] = billing.money(sum(i["amount"] + i["vat_amount"] for i in items))
+            row["missing"] = missing
+        rows.append(row)
+    counts = dict(db.execute("SELECT unit_type, COUNT(*) FROM units WHERE active=1 GROUP BY unit_type").fetchall())
+    read_date = next((r["read_date"] for m in readings.values() for r in m["current"].values() if r["read_date"]),
+                     date.today().isoformat())
+    return render_template("admin/sheet.html", period=period, unit_type=unit_type, cols=cols, rows=rows,
+                           penalty_types=penalty_types, counts=counts, read_date=read_date)
+
+
 # ---------------------------------------------------------------- billing / invoices
 @bp.route("/billing", methods=("GET", "POST"))
 @admin_required
@@ -654,7 +863,7 @@ def billing_page():
         done = db.execute(
             "SELECT COUNT(*) FROM meter_readings r JOIN units u ON u.id=r.unit_id"
             " WHERE r.charge_type_id=? AND r.period=? AND u.active=1", (m["id"], period)).fetchone()[0]
-        meter_status.append({"ct": m, "done": done})
+        meter_status.append({"ct": m, "done": done, "total": len(units_for_charge(db, m))})
     invoices = db.execute("SELECT * FROM invoices WHERE period=? ORDER BY length(unit_no), unit_no", (period,)).fetchall()
     pending_adhoc = db.execute("SELECT COUNT(*) FROM adhoc_charges WHERE invoice_id IS NULL AND period<=?",
                                (period,)).fetchone()[0]

@@ -27,7 +27,7 @@
 
   <section class="bill-meta">
     <div class="bill-room">
-      <div class="label">ห้องชุดเลขที่</div>
+      <div class="label">{{ 'ร้านค้า' if unit and unit.unit_type == 'shop' else 'ห้องชุดเลขที่' }}</div>
       <div class="value">{{ inv.unit_no }}</div>
     </div>
     <dl class="bill-party">

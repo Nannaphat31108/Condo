@@ -12,7 +12,7 @@
       <tr><td>ห้องที่เปิดใช้งาน</td><td class="num">{{ unit_count }} ห้อง</td></tr>
       {% for m in meter_status %}
       <tr><td>จดมิเตอร์ {{ m.ct.name }}</td>
-        <td class="num">{% if m.done >= unit_count %}<span class="badge paid">ครบ {{ m.done }}/{{ unit_count }}</span>{% else %}<a href="{{ url_for('admin.meters', period=period, charge_type_id=m.ct.id) }}"><span class="badge unpaid">{{ m.done }}/{{ unit_count }} จดต่อ →</span></a>{% endif %}</td></tr>
+        <td class="num">{% if m.done >= m.total %}<span class="badge paid">ครบ {{ m.done }}/{{ m.total }}</span>{% else %}<a href="{{ url_for('admin.meters', period=period, charge_type_id=m.ct.id) }}"><span class="badge unpaid">{{ m.done }}/{{ m.total }} จดต่อ →</span></a>{% endif %}</td></tr>
       {% endfor %}
       <tr><td>รายการเพิ่มเติมที่รอออกบิล</td><td class="num"><a href="{{ url_for('admin.adhoc', period=period) }}">{{ pending_adhoc }} รายการ</a></td></tr>
       <tr><td>วันที่ออกบิล / ครบกำหนด</td><td class="num">{{ issue_date }} / {{ due_date }}</td></tr>

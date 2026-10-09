@@ -18,6 +18,7 @@
       <td class="small">
         {% if c.method == 'meter_tiered' %}
           {% for t in parse_tiers(c.tiers) %}{{ 'เกิน ' ~ (loop.previtem.upto|num) ~ ' ' if not loop.first }}{{ ('ถึง ' ~ (t.upto|num)) if t.upto is not none else ('ขึ้นไป' if not loop.first else 'ทุกหน่วย') }}: {{ t.rate|num }} บ.<br>{% endfor %}
+        {% elif c.manual_amount %}กรอกเอง
         {% elif c.method == 'fixed' %}{{ c.rate|baht }} บาท
         {% else %}{{ c.rate|num }} บาท/{{ c.unit_label or 'หน่วย' }}{% endif %}
         {% if c.fixed_fee %}<br>+ ค่าบริการ {{ c.fixed_fee|num }}{% endif %}
@@ -26,7 +27,8 @@
       </td>
       <td class="small">{{ FREQUENCY_LABELS[c.frequency] }}{% if c.frequency == 'yearly' %} (เดือน{{ THAI_MONTHS[c.bill_month or 1] }}){% endif %}
         {% if c.start_period or c.end_period %}<br>{{ c.start_period|period if c.start_period else '...' }} – {{ c.end_period|period if c.end_period else '...' }}{% endif %}</td>
-      <td class="small">{{ 'ทุกห้อง' if c.apply_to == 'all' else ('เฉพาะ ' ~ c.unit_count ~ ' ห้อง') }}</td>
+      <td class="small"><span class="badge {{ 'partial' if c.unit_type == 'shop' else 'resident' }}">{{ CHARGE_UNIT_TYPE_LABELS[c.unit_type] }}</span><br>
+        {% if c.manual_amount %}กรอกยอดเองรายห้อง ({{ c.unit_count }}){% else %}{{ 'ทุกห้อง' if c.apply_to == 'all' else ('เฉพาะ ' ~ c.unit_count ~ ' ห้อง') }}{% endif %}</td>
       <td>{% if c.active %}<span class="badge on">ใช้งาน</span>{% else %}<span class="badge off">ปิด</span>{% endif %}</td>
       <td class="nowrap">
         <a class="btn btn-sm" href="{{ url_for('admin.charge_form', charge_id=c.id) }}">แก้ไข</a>

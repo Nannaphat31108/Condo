@@ -11,6 +11,8 @@ METHOD_LABELS = {
 }
 METER_METHODS = ("meter_rate", "meter_tiered")
 FLAT_RATE_LABEL = "เหมาจ่าย"  # ใช้น้อยกว่าค่าขั้นต่ำ
+UNIT_TYPE_LABELS = {"room": "ห้องชุด", "shop": "ร้านค้าหน้าอาคาร"}
+CHARGE_UNIT_TYPE_LABELS = {"all": "ทุกประเภท", "room": "ห้องชุด", "shop": "ร้านค้า"}
 FREQUENCY_LABELS = {"monthly": "ทุกเดือน", "yearly": "ปีละครั้ง", "once": "ครั้งเดียว"}
 STATUS_LABELS = {"unpaid": "ค้างชำระ", "partial": "ชำระบางส่วน", "paid": "ชำระแล้ว", "void": "ยกเลิก"}
 THAI_MONTHS = ["", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
@@ -78,9 +80,14 @@ def fmt_num(value):
     return f"{value:,.0f}" if value == int(value) else f"{value:,.2f}"
 
 
-def charge_applies(ct, period, unit_id, selected_unit_ids):
+def charge_applies(ct, period, unit, selections):
+    """ค่าบริการนี้ต้องเก็บจากห้อง/ร้านนี้ในงวดนี้หรือไม่ (selections = {unit_id: ยอดเฉพาะห้อง})"""
     if not ct["active"]:
         return False
+    if ct["unit_type"] not in ("all", None) and ct["unit_type"] != unit["unit_type"]:
+        return False
+    if ct["manual_amount"] and not selections.get(unit["id"]):
+        return False  # กรอกยอดเองรายห้อง: ห้องที่ไม่ได้กรอกยอดไม่ต้องเก็บ
     if ct["start_period"] and period < ct["start_period"]:
         return False
     if ct["end_period"] and period > ct["end_period"]:
@@ -90,7 +97,7 @@ def charge_applies(ct, period, unit_id, selected_unit_ids):
         return False
     if ct["frequency"] == "once" and period != (ct["start_period"] or period):
         return False
-    if ct["apply_to"] == "selected" and unit_id not in selected_unit_ids:
+    if ct["apply_to"] == "selected" and unit["id"] not in selections:
         return False
     return True
 
@@ -184,7 +191,7 @@ def build_unit_items(db, unit, period, charge_types, selections):
     items, missing = [], []
     for ct in charge_types:
         sel = selections.get(ct["id"], {})
-        if not charge_applies(ct, period, unit["id"], sel):
+        if not charge_applies(ct, period, unit, sel):
             continue
         reading = None
         if ct["method"] in METER_METHODS:
@@ -210,10 +217,13 @@ def build_unit_items(db, unit, period, charge_types, selections):
         (unit["id"], period),
     ).fetchall()
     for a in adhoc:
+        penalty = a["kind"] == "penalty"
         items.append({
-            "charge_type_id": None, "description": a["description"], "detail": f"รายการเพิ่มเติม งวด {period_label(a['period'])}",
+            "charge_type_id": None, "description": a["description"],
+            "detail": "" if penalty else f"รายการเพิ่มเติม งวด {period_label(a['period'])}",
             "quantity": 1, "unit_label": "รายการ", "unit_price": a["amount"], "amount": money(a["amount"]),
-            "vat_amount": 0.0, "sort_order": 900, "kind": "manual", "meter_prev": None, "meter_curr": None,
+            "vat_amount": 0.0, "sort_order": 950 if penalty else 900, "kind": "penalty" if penalty else "manual",
+            "meter_prev": None, "meter_curr": None,
         })
     return items, missing, [a["id"] for a in adhoc]
 

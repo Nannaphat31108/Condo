@@ -22,6 +22,7 @@
       {% if g.user.role == 'admin' %}
         <a href="{{ url_for('admin.dashboard') }}" class="{{ 'active' if ep == 'admin.dashboard' }}">ภาพรวม</a>
         <div class="section">งานประจำเดือน</div>
+        <a href="{{ url_for('admin.sheet') }}" class="{{ 'active' if ep == 'admin.sheet' }}"><b>กรอกรวมทุกรายการ</b></a>
         <a href="{{ url_for('admin.meters') }}" class="{{ 'active' if ep == 'admin.meters' }}">จดมิเตอร์น้ำ/ไฟ</a>
         <a href="{{ url_for('admin.adhoc') }}" class="{{ 'active' if ep == 'admin.adhoc' }}">รายการเรียกเก็บเพิ่มเติม</a>
         <a href="{{ url_for('admin.billing_page') }}" class="{{ 'active' if ep == 'admin.billing_page' }}">ออกใบแจ้งหนี้</a>

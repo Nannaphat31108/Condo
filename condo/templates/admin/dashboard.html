@@ -14,7 +14,8 @@
 
 {% if not stats.cnt %}
 <div class="flash info">งวด {{ period|period }} ยังไม่ได้ออกใบแจ้งหนี้ —
-  ขั้นตอน: <a href="{{ url_for('admin.meters', period=period) }}">1. จดมิเตอร์</a> →
+  กรอกทุกอย่างในหน้าเดียวได้ที่ <a href="{{ url_for('admin.sheet', period=period) }}"><b>กรอกรวมทุกรายการ</b></a> หรือทีละขั้น:
+  <a href="{{ url_for('admin.meters', period=period) }}">1. จดมิเตอร์</a> →
   <a href="{{ url_for('admin.adhoc', period=period) }}">2. เพิ่มรายการพิเศษ (ถ้ามี)</a> →
   <a href="{{ url_for('admin.billing_page', period=period) }}">3. ออกใบแจ้งหนี้</a></div>
 {% endif %}

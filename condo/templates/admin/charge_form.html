@@ -61,6 +61,10 @@
         <div class="field"><label>เริ่มเรียกเก็บงวด</label><input type="month" name="start_period" value="{{ ct.start_period or '' if ct else '' }}"><div class="help">ไม่ระบุ = ตั้งแต่ตอนนี้ (แบบครั้งเดียวต้องระบุ)</div></div>
         <div class="field"><label>สิ้นสุดงวด</label><input type="month" name="end_period" value="{{ ct.end_period or '' if ct else '' }}"><div class="help">ไม่ระบุ = ไม่มีกำหนด</div></div>
       </div>
+      <div class="field"><label>ใช้กับประเภท</label>
+        <select name="unit_type">{% for k, v in CHARGE_UNIT_TYPE_LABELS.items() %}<option value="{{ k }}" {{ 'selected' if ct and ct.unit_type == k }}>{{ v }}</option>{% endfor %}</select></div>
+      <div class="field"><label class="check"><input type="checkbox" name="manual_amount" value="1" {{ 'checked' if ct and ct.manual_amount }}> กรอกยอดเองแต่ละห้อง/ร้าน (เช่น ค่าเช่าพื้นที่)</label>
+        <div class="help">ใส่ยอดในช่อง "ยอดเฉพาะห้อง" ด้านล่าง หรือในหน้า "กรอกรวมทุกรายการ" — ห้องที่ไม่ได้ใส่ยอดจะไม่ถูกเรียกเก็บ</div></div>
       <div class="field"><label>ใช้กับห้อง</label>
         <label class="check"><input type="radio" name="apply_to" value="all" {{ 'checked' if not ct or ct.apply_to != 'selected' }}> ทุกห้อง</label>
         <label class="check"><input type="radio" name="apply_to" value="selected" {{ 'checked' if ct and ct.apply_to == 'selected' }}> เฉพาะห้องที่เลือก</label>

@@ -16,6 +16,8 @@ def create_app(test_config=None):
         SESSION_COOKIE_SECURE=bool(os.environ.get("RENDER") or os.environ.get("CONDO_HTTPS")),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
+        # หน้ากรอกรวมมีช่องกรอกหลายพันช่อง (ประมาณ 200 ห้อง x หลายรายการ)
+        MAX_FORM_PARTS=50_000,
     )
     if test_config:
         app.config.update(test_config)
@@ -54,6 +56,8 @@ def create_app(test_config=None):
         FREQUENCY_LABELS=billing.FREQUENCY_LABELS,
         STATUS_LABELS=billing.STATUS_LABELS,
         THAI_MONTHS=billing.THAI_MONTHS,
+        UNIT_TYPE_LABELS=billing.UNIT_TYPE_LABELS,
+        CHARGE_UNIT_TYPE_LABELS=billing.CHARGE_UNIT_TYPE_LABELS,
     )
 
     @app.context_processor

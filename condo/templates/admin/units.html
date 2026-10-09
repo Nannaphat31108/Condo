@@ -6,15 +6,20 @@
     <form method="get" class="filters"><input type="text" name="q" value="{{ q }}" placeholder="ค้นหาเลขห้อง ชื่อเจ้าของ/ผู้เช่า เบอร์โทร"></form>
     <a class="btn btn-danger" href="{{ url_for('admin.unit_bulk_delete') }}">ลบหลายห้อง</a>
     <a class="btn" href="{{ url_for('admin.unit_import') }}">เพิ่มห้องจำนวนมาก</a>
+    <a class="btn" href="{{ url_for('admin.unit_form', type='shop') }}">+ เพิ่มร้านค้า</a>
     <a class="btn btn-primary" href="{{ url_for('admin.unit_form') }}">+ เพิ่มห้อง</a>
   </div>
+</div>
+<div class="tabs">
+  <a href="{{ url_for('admin.units', q=q) }}" class="{{ 'on' if not unit_type }}">ทั้งหมด ({{ counts.values()|sum }})</a>
+  {% for k, v in UNIT_TYPE_LABELS.items() %}<a href="{{ url_for('admin.units', type=k, q=q) }}" class="{{ 'on' if unit_type == k }}">{{ v }} ({{ counts.get(k, 0) }})</a>{% endfor %}
 </div>
 <div class="card"><div class="table-wrap"><table>
   <thead><tr><th>เลขห้อง</th><th>อาคาร/ชั้น</th><th class="num">พื้นที่ (ตร.ม.)</th><th>เจ้าของห้องชุด</th><th>ผู้เช่า</th><th>บัญชีผู้ใช้</th><th class="num">ค้างชำระ</th><th>สถานะ</th><th></th></tr></thead>
   <tbody>
   {% for u in units %}
     <tr>
-      <td><a href="{{ url_for('admin.unit_detail', unit_id=u.id) }}"><b>{{ u.unit_no }}</b></a></td>
+      <td><a href="{{ url_for('admin.unit_detail', unit_id=u.id) }}"><b>{{ u.unit_no }}</b></a>{% if u.unit_type == 'shop' %} <span class="badge partial">ร้านค้า</span>{% endif %}</td>
       <td>{{ u.building }}{% if u.floor %} / ชั้น {{ u.floor }}{% endif %}</td>
       <td class="num">{{ u.area_sqm|num }}</td>
       <td>{{ u.owner_name or '-' }}{% if u.phone %}<div class="muted small">{{ u.phone }}</div>{% endif %}</td>

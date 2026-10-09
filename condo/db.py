@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS units (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     unit_no     TEXT NOT NULL UNIQUE,
+    unit_type   TEXT NOT NULL DEFAULT 'room',  -- room = ห้องชุด, shop = ร้านค้าหน้าอาคาร
     building    TEXT DEFAULT '',
     floor       TEXT DEFAULT '',
     area_sqm    REAL NOT NULL DEFAULT 0,
@@ -57,6 +58,8 @@ CREATE TABLE IF NOT EXISTS charge_types (
     start_period TEXT,                         -- YYYY-MM เริ่มเรียกเก็บ
     end_period   TEXT,                         -- YYYY-MM สิ้นสุด
     apply_to     TEXT NOT NULL DEFAULT 'all' CHECK (apply_to IN ('all', 'selected')),
+    unit_type    TEXT NOT NULL DEFAULT 'all',  -- all / room / shop
+    manual_amount INTEGER NOT NULL DEFAULT 0,  -- 1 = แอดมินกรอกยอดเองแต่ละห้อง (เช่น ค่าเช่าพื้นที่)
     sort_order   INTEGER NOT NULL DEFAULT 0,
     active       INTEGER NOT NULL DEFAULT 1,
     created_at   TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -90,6 +93,7 @@ CREATE TABLE IF NOT EXISTS adhoc_charges (
     description TEXT NOT NULL,
     amount      REAL NOT NULL,
     invoice_id  INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
+    kind        TEXT NOT NULL DEFAULT 'manual',  -- manual / penalty / other (ช่อง "อื่น ๆ" ในหน้ากรอกรวม)
     created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
@@ -176,6 +180,18 @@ DEFAULT_SETTINGS = {
 
 WATER_DESCRIPTION = "ใช้ 1-4 หน่วย เหมาจ่าย 65 บาท / 5 หน่วยขึ้นไป หน่วยละ 16 บาท"
 
+# ค่าบริการของร้านค้าหน้าอาคาร
+SHOP_CHARGE_TYPES = [
+    dict(name="ค่าเช่าพื้นที่", method="fixed", rate=0, unit_label="เดือน", sort_order=1, active=1,
+         unit_type="shop", manual_amount=1, description="กรอกค่าเช่าของแต่ละร้านเอง"),
+    dict(name="ค่าน้ำประปา (ร้านค้า)", method="meter_rate", rate=18, unit_label="หน่วย", sort_order=10, active=1,
+         unit_type="shop", description="หน่วยละ 18 บาท"),
+    dict(name="ค่ารักษามิเตอร์", method="fixed", rate=25, unit_label="เดือน", sort_order=11, active=1,
+         unit_type="shop", description="ค่ารักษามิเตอร์น้ำ 25 บาทต่อเดือน"),
+    dict(name="ค่าไฟฟ้า (ร้านค้า)", method="meter_rate", rate=8, unit_label="หน่วย", sort_order=20, active=1,
+         unit_type="shop", description="หน่วยละ 8 บาท"),
+]
+
 DEFAULT_CHARGE_TYPES = [
     dict(name="ค่าส่วนกลาง", method="fixed", rate=250, unit_label="เดือน", sort_order=5, active=1,
          description="เหมาจ่ายเดือนละ 250 บาทต่อห้อง"),
@@ -205,8 +221,30 @@ def close_db(_exc=None):
         db.close()
 
 
+def add_columns(db, table, columns):
+    """เพิ่มคอลัมน์ที่ยังไม่มี คืนชื่อคอลัมน์ที่เพิ่งเพิ่ม"""
+    existing = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
+    added = []
+    for name, ddl in columns:
+        if name not in existing:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+            added.append(name)
+    return added
+
+
+def insert_charge_type(db, ct):
+    ct = {"fixed_fee": 0, "min_charge": 0, **ct, "tiers": json.dumps([])}
+    db.execute(f"INSERT INTO charge_types ({', '.join(ct)}) VALUES ({', '.join('?' * len(ct))})", list(ct.values()))
+
+
 def migrate(db):
     """อัปเดตฐานข้อมูลเดิมให้มีคอลัมน์ใหม่"""
+    add_columns(db, "units", [("unit_type", "TEXT NOT NULL DEFAULT 'room'")])
+    add_columns(db, "adhoc_charges", [("kind", "TEXT NOT NULL DEFAULT 'manual'")])
+    if "unit_type" in add_columns(db, "charge_types", [("unit_type", "TEXT NOT NULL DEFAULT 'all'"),
+                                                       ("manual_amount", "INTEGER NOT NULL DEFAULT 0")]):
+        # ค่าบริการเดิมทั้งหมดเป็นของห้องชุด ร้านค้ามีชุดค่าบริการของตัวเอง
+        db.execute("UPDATE charge_types SET unit_type='room'")
     cols = {r["name"] for r in db.execute("PRAGMA table_info(invoice_items)")}
     for name, ddl in (("kind", "TEXT NOT NULL DEFAULT 'auto'"), ("meter_prev", "REAL"), ("meter_curr", "REAL"),
                       ("meter_prev_date", "TEXT"), ("meter_curr_date", "TEXT")):
@@ -257,12 +295,13 @@ def init_db(db):
                        (generate_password_hash(reset), "ผู้ดูแลระบบ"))
     if db.execute("SELECT COUNT(*) FROM charge_types").fetchone()[0] == 0:
         for ct in DEFAULT_CHARGE_TYPES:
-            ct = {"fixed_fee": 0, "min_charge": 0, **ct, "tiers": json.dumps([])}
-            cols = ", ".join(ct)
-            db.execute(
-                f"INSERT INTO charge_types ({cols}) VALUES ({', '.join('?' * len(ct))})",
-                list(ct.values()),
-            )
+            insert_charge_type(db, {"unit_type": "room", **ct})
+    # เพิ่มค่าบริการร้านค้าครั้งเดียว (ถ้าแอดมินลบทิ้งภายหลังจะไม่สร้างซ้ำ)
+    if not db.execute("SELECT 1 FROM settings WHERE key='_shop_charges_seeded'").fetchone():
+        if not db.execute("SELECT 1 FROM charge_types WHERE unit_type='shop'").fetchone():
+            for ct in SHOP_CHARGE_TYPES:
+                insert_charge_type(db, ct)
+        db.execute("INSERT INTO settings (key, value) VALUES ('_shop_charges_seeded', '1')")
     db.commit()
 
 
