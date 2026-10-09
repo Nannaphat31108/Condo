@@ -290,3 +290,35 @@ def test_generate_rooms_bulk_payment_and_receipt_print(app, client):
         assert r.status_code == 200, url
     page = client.get("/admin/receipts/print?period=2026-10&layout=half").get_data(as_text=True)
     assert page.count('class="half-sheet"') == 4 and "0004/10/2026" in page
+
+
+def test_example_settings_migrate_and_meter_dates(app, client):
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE settings SET value='นิติบุคคลอาคารชุด ตัวอย่างคอนโด' WHERE key='condo_name'")
+        db.execute("UPDATE settings SET value='' WHERE key='phone'")
+        db.commit()
+        from condo.db import init_db
+        init_db(db)
+        settings = dict(db.execute("SELECT key, value FROM settings").fetchall())
+        assert settings["condo_name"] == "นิติบุคคลอาคารชุดเคหะชุมชนคลองจั่น 26"
+        assert settings["phone"] == "02-3755395"
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/new", {"unit_no": "26/94", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        unit_id = db.execute("SELECT id FROM units").fetchone()[0]
+        water = db.execute("SELECT id FROM charge_types WHERE name='ค่าน้ำประปา'").fetchone()[0]
+        db.execute("UPDATE charge_types SET active=0 WHERE method LIKE 'meter%' AND id!=?", (water,))
+        db.commit()
+    for period, date_, prev, curr in (("2026-09", "2026-09-08", 0, 10), ("2026-10", "2026-10-08", 10, 25)):
+        s.post("/admin/meters", {"period": period, "charge_type_id": water, "read_date": date_,
+                                 f"prev_{unit_id}": prev, f"curr_{unit_id}": curr})
+    s.post("/admin/billing", {"period": "2026-10"})
+    with app.app_context():
+        it = get_db().execute("SELECT * FROM invoice_items WHERE description='ค่าน้ำประปา'").fetchone()
+        assert (it["meter_prev_date"], it["meter_curr_date"]) == ("2026-09-08", "2026-10-08")
+        inv_id = it["invoice_id"]
+    page = client.get(f"/admin/invoices/{inv_id}").get_data(as_text=True)
+    assert "จดครั้งก่อน 8 ก.ย. 69" in page and "จดครั้งหลัง 8 ต.ค. 69" in page and "logo.png" in page

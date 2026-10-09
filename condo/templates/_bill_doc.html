@@ -1,0 +1,136 @@
+{#- เอกสารใบแจ้งหนี้ / ใบเสร็จรับเงิน
+    ต้องมี: mode ('invoice' | 'receipt'), inv, items, unit; ใบเสร็จต้องมี p (การชำระเงิน)
+    ไม่บังคับ: compact (พิมพ์ 2 ใบต่อ A4) -#}
+{%- set is_receipt = mode == 'receipt' -%}
+{%- set is_compact = compact is defined and compact -%}
+{%- set logo = settings.logo or url_for('static', filename='logo.png') -%}
+{%- set amount = p.amount if is_receipt else inv.total -%}
+<article class="bill {{ 'bill--receipt' if is_receipt else 'bill--invoice' }}{{ ' bill--compact' if is_compact }}">
+  <img class="bill-watermark" src="{{ logo }}" alt="">
+  <header class="bill-head">
+    <img class="bill-logo" src="{{ logo }}" alt="โลโก้">
+    <div class="bill-org">
+      <div class="bill-org-name">{{ settings.condo_name }}</div>
+      {% if settings.address %}<div>{{ settings.address }}</div>{% endif %}
+      <div>
+        {%- if settings.house_code %}รหัสประจำบ้าน {{ settings.house_code }}{% endif -%}
+        {%- if settings.house_code and settings.phone %} · {% endif -%}
+        {%- if settings.phone %}<span class="nowrap">โทร. {{ settings.phone }}</span>{% endif -%}
+      </div>
+      {% if settings.tax_id %}<div>เลขประจำตัวผู้เสียภาษี {{ settings.tax_id }}</div>{% endif %}
+    </div>
+    <div class="bill-title">
+      <div class="bill-title-th">{{ 'ใบเสร็จรับเงิน' if is_receipt else 'ใบแจ้งหนี้' }}</div>
+      <div class="bill-title-en">{{ 'RECEIPT' if is_receipt else 'INVOICE' }}</div>
+    </div>
+  </header>
+
+  <section class="bill-meta">
+    <div class="bill-room">
+      <div class="label">ห้องชุดเลขที่</div>
+      <div class="value">{{ inv.unit_no }}</div>
+    </div>
+    <dl class="bill-party">
+      <div><dt>{{ 'ได้รับเงินจาก' if is_receipt else 'ชื่อเจ้าของห้องชุด' }}</dt><dd>{{ inv.owner_name or '—' }}</dd></div>
+      <div><dt>ประจำเดือน</dt><dd>{{ inv.period|period }}</dd></div>
+      {% if unit and (unit.building or unit.floor) %}<div><dt>อาคาร / ชั้น</dt><dd>{{ unit.building or '—' }} / {{ unit.floor or '—' }}</dd></div>{% endif %}
+    </dl>
+    <dl class="bill-ref">
+      <div><dt>เลขที่</dt><dd class="strong">{{ p.receipt_no if is_receipt else inv.invoice_no }}</dd></div>
+      <div><dt>วันที่</dt><dd>{{ (p.paid_at if is_receipt else inv.issue_date)|thaidate }}</dd></div>
+      {% if is_receipt %}
+        <div><dt>อ้างอิงใบแจ้งหนี้</dt><dd>{{ inv.invoice_no }}</dd></div>
+      {% else %}
+        <div><dt>กำหนดชำระ</dt><dd class="due">{{ inv.due_date|thaidate }}</dd></div>
+      {% endif %}
+    </dl>
+  </section>
+
+  {% if not is_receipt and inv.status in ('paid', 'void') %}
+    <div class="bill-stamp {{ inv.status }}">{{ 'ชำระแล้ว' if inv.status == 'paid' else 'ยกเลิก' }}</div>
+  {% endif %}
+
+  <table class="bill-items">
+    <thead>
+      <tr><th class="c" style="width:9%">ลำดับที่</th><th>รายการค่าบริการ</th><th class="num" style="width:14%">จำนวนหน่วย</th><th class="num" style="width:15%">ราคาต่อหน่วย</th><th class="num" style="width:17%">จำนวนเงิน (บาท)</th></tr>
+    </thead>
+    <tbody>
+    {% for it in items %}
+      <tr class="{{ 'is-penalty' if it.kind == 'penalty' }}">
+        <td class="c">{{ loop.index }}</td>
+        <td>
+          <div class="item-name">{{ it.description }}</div>
+          {% if it.meter_curr is not none %}
+          <div class="item-meter">
+            <span>จดครั้งก่อน{% if it.meter_prev_date %} {{ it.meter_prev_date|thaidate_short }}{% endif %} · เลขมาตร <b>{{ it.meter_prev|num }}</b></span>
+            <span>จดครั้งหลัง{% if it.meter_curr_date %} {{ it.meter_curr_date|thaidate_short }}{% endif %} · เลขมาตร <b>{{ it.meter_curr|num }}</b></span>
+          </div>
+          {% endif %}
+        </td>
+        {% if it.meter_curr is not none %}
+          <td class="num">{{ it.quantity|num }} <span class="unit">{{ it.unit_label }}</span></td>
+          <td class="num">{{ it.unit_price|baht }}</td>
+        {% else %}
+          <td class="num muted">—</td><td class="num muted">—</td>
+        {% endif %}
+        <td class="num amount">{{ (it.amount + it.vat_amount if is_receipt else it.amount)|baht }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% if not is_receipt and inv.vat %}
+  <div class="bill-subtotals"><span>รวมก่อนภาษี {{ inv.subtotal|baht }}</span><span>ภาษีมูลค่าเพิ่ม {{ inv.vat|baht }}</span></div>
+  {% endif %}
+
+  <div class="bill-total">
+    <div class="bill-total-words">
+      <div class="label">จำนวนเงินรวมทั้งสิ้น (ตัวอักษร)</div>
+      <div class="words">{{ amount|bahttext }}</div>
+    </div>
+    <div class="bill-total-amount">
+      <div class="label">{{ ('รับชำระครั้งนี้' if p.amount != inv.total else 'รวมเงินทั้งสิ้น') if is_receipt else 'ยอดที่ต้องชำระ' }}</div>
+      <div class="amount">{{ amount|baht }}</div>
+      <div class="cur">บาท</div>
+    </div>
+  </div>
+
+  {% if is_receipt %}
+    <div class="bill-pay">
+      <span class="label">ชำระโดย</span>
+      {% set known = ['เงินสด', 'โอนเงิน', 'พร้อมเพย์', 'เช็ค'] %}
+      {% for m in known %}<span class="box{{ ' on' if p.method == m }}">{{ m }}</span>{% endfor %}
+      <span class="box{{ ' on' if p.method not in known }}">อื่น ๆ{% if p.method not in known %} ({{ p.method }}){% endif %}</span>
+      {% if p.reference %}<span class="ref">อ้างอิง {{ p.reference }}</span>{% endif %}
+    </div>
+    {% if p.amount != inv.total %}
+      <div class="bill-note-line">ยอดตามใบแจ้งหนี้ {{ inv.total|baht }} บาท · ชำระสะสม {{ inv.paid_amount|baht }} บาท · คงค้าง {{ (inv.total - inv.paid_amount)|baht }} บาท</div>
+    {% endif %}
+    {% if p.note %}<div class="bill-note-line">หมายเหตุ: {{ p.note }}</div>{% endif %}
+  {% else %}
+    {% if inv.paid_amount and inv.status == 'partial' %}
+      <div class="bill-note-line">ชำระแล้ว {{ inv.paid_amount|baht }} บาท · <b>คงค้าง {{ (inv.total - inv.paid_amount)|baht }} บาท</b></div>
+    {% endif %}
+    <div class="bill-pay invoice-pay">
+      {% if settings.bank_info %}<div><span class="label">ช่องทางชำระเงิน</span> {{ settings.bank_info }}</div>{% endif %}
+      <div><span class="label">กรุณาชำระภายใน</span> <b>{{ inv.due_date|thaidate }}</b></div>
+    </div>
+  {% endif %}
+
+  <div class="bill-signs">
+    <div>
+      <div class="line"></div>
+      <div>ลงชื่อ ({{ '.' * 40 }})</div>
+      <div class="role">{{ settings.manager_title or 'ผู้จัดการนิติบุคคล' }}</div>
+    </div>
+    <div>
+      <div class="line"></div>
+      <div>ลงชื่อ ({{ '.' * 40 }})</div>
+      <div class="role">{{ 'ผู้รับเงิน' if is_receipt else 'ผู้ออกใบแจ้งหนี้' }} · วันที่ ......./......./.......</div>
+    </div>
+  </div>
+
+  <footer class="bill-foot">
+    {{ settings.receipt_footer if is_receipt else inv.note }}
+  </footer>
+</article>

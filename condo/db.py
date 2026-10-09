@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS meter_readings (
     period         TEXT NOT NULL,
     prev_reading   REAL NOT NULL,
     curr_reading   REAL NOT NULL,
+    read_date      TEXT,                       -- วันที่จดมิเตอร์
     recorded_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     UNIQUE (charge_type_id, unit_id, period)
 );
@@ -124,7 +125,9 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     sort_order     INTEGER NOT NULL DEFAULT 0,
     kind           TEXT NOT NULL DEFAULT 'auto',  -- auto / manual / penalty
     meter_prev     REAL,
-    meter_curr     REAL
+    meter_curr     REAL,
+    meter_prev_date TEXT,
+    meter_curr_date TEXT
 );
 
 CREATE TABLE IF NOT EXISTS payments (
@@ -149,11 +152,18 @@ CREATE TABLE IF NOT EXISTS activity_log (
 );
 """
 
+EXAMPLE_CONDO_NAME = "นิติบุคคลอาคารชุด ตัวอย่างคอนโด"
+
 DEFAULT_SETTINGS = {
-    "condo_name": "นิติบุคคลอาคารชุด ตัวอย่างคอนโด",
-    "address": "",
-    "phone": "",
+    "condo_name": "นิติบุคคลอาคารชุดเคหะชุมชนคลองจั่น 26",
+    "address": "ถ.นวมินทร์ แขวงคลองจั่น เขตบางกะปิ กรุงเทพมหานคร",
+    "phone": "02-3755395",
     "tax_id": "",
+    "house_code": "1006-196055-1",   # รหัสประจำบ้าน
+    "manager_title": "ผู้จัดการนิติบุคคลอาคารชุดเคหะชุมชนคลองจั่น 26",
+    "receipt_footer": "ใบเสร็จนี้จะสมบูรณ์ต่อเมื่อมีลายมือชื่อผู้จัดการนิติบุคคลอาคารชุด พนักงานเก็บเงิน"
+                      " และประทับตราของนิติบุคคลอาคารชุดเคหะชุมชนคลองจั่น 26",
+    "logo": "",                      # รูปโลโก้ที่อัปโหลด (data URL) ว่าง = ใช้ static/logo.png
     "issue_day": "1",          # วันที่ออกใบแจ้งหนี้
     "due_days": "15",          # ครบกำหนดชำระภายในกี่วันหลังออกบิล
     "penalty_types": "เบี้ยปรับ\nเบี้ยปรับค่าน้ำ",  # ชนิดเบี้ยปรับที่แอดมินกรอกเอง บรรทัดละ 1 ชนิด
@@ -194,9 +204,19 @@ def close_db(_exc=None):
 def migrate(db):
     """อัปเดตฐานข้อมูลเดิมให้มีคอลัมน์ใหม่"""
     cols = {r["name"] for r in db.execute("PRAGMA table_info(invoice_items)")}
-    for name, ddl in (("kind", "TEXT NOT NULL DEFAULT 'auto'"), ("meter_prev", "REAL"), ("meter_curr", "REAL")):
+    for name, ddl in (("kind", "TEXT NOT NULL DEFAULT 'auto'"), ("meter_prev", "REAL"), ("meter_curr", "REAL"),
+                      ("meter_prev_date", "TEXT"), ("meter_curr_date", "TEXT")):
         if name not in cols:
             db.execute(f"ALTER TABLE invoice_items ADD COLUMN {name} {ddl}")
+    if "read_date" not in {r["name"] for r in db.execute("PRAGMA table_info(meter_readings)")}:
+        db.execute("ALTER TABLE meter_readings ADD COLUMN read_date TEXT")
+    # ฐานข้อมูลที่ยังใช้ชื่อตัวอย่าง: เปลี่ยนเป็นข้อมูลนิติบุคคลจริง (เฉพาะช่องที่ยังไม่ได้แก้)
+    row = db.execute("SELECT value FROM settings WHERE key='condo_name'").fetchone()
+    if row and row[0] == EXAMPLE_CONDO_NAME:
+        db.execute("UPDATE settings SET value=? WHERE key='condo_name'", (DEFAULT_SETTINGS["condo_name"],))
+        for key in ("address", "phone"):
+            db.execute("UPDATE settings SET value=? WHERE key=? AND COALESCE(value,'')=''",
+                       (DEFAULT_SETTINGS[key], key))
     # รายการที่ไม่ได้มาจากค่าบริการ (รายการเพิ่มเติมเดิม) ถือเป็นรายการที่แอดมินใส่เอง
     if "kind" not in cols:
         db.execute("UPDATE invoice_items SET kind='manual' WHERE charge_type_id IS NULL")

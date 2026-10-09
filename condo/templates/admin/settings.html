@@ -2,19 +2,28 @@
 {% from "_macros.html" import csrf %}
 {% block content %}
 <h1>ตั้งค่าทั่วไป</h1>
-<form method="post">
+<form method="post" enctype="multipart/form-data">
   {{ csrf() }}
   <div class="grid grid-2">
     <div class="card">
       <h2>ข้อมูลนิติบุคคล (แสดงบนใบแจ้งหนี้/ใบเสร็จ)</h2>
       <div class="field"><label>ชื่อนิติบุคคล / โครงการ</label><input type="text" name="condo_name" value="{{ settings.condo_name }}" required></div>
       <div class="field"><label>ที่อยู่</label><textarea name="address" rows="2">{{ settings.address }}</textarea></div>
+      <div class="field"><label>รหัสประจำบ้าน</label><input type="text" name="house_code" value="{{ settings.house_code }}"></div>
       <div class="form-row">
         <div class="field"><label>โทรศัพท์</label><input type="text" name="phone" value="{{ settings.phone }}"></div>
         <div class="field"><label>เลขประจำตัวผู้เสียภาษี</label><input type="text" name="tax_id" value="{{ settings.tax_id }}"></div>
       </div>
       <div class="field"><label>ช่องทางชำระเงิน</label><textarea name="bank_info" rows="2">{{ settings.bank_info }}</textarea></div>
       <div class="field"><label>หมายเหตุท้ายใบแจ้งหนี้</label><textarea name="invoice_note" rows="2">{{ settings.invoice_note }}</textarea></div>
+      <div class="field"><label>ตำแหน่งผู้ลงนาม (ใต้ช่องเซ็นชื่อ)</label><input type="text" name="manager_title" value="{{ settings.manager_title }}"></div>
+      <div class="field"><label>ข้อความท้ายใบเสร็จ</label><textarea name="receipt_footer" rows="2">{{ settings.receipt_footer }}</textarea></div>
+      <div class="field"><label>โลโก้</label>
+        <div style="display:flex;gap:1rem;align-items:center">
+          <img src="{{ settings.logo or url_for('static', filename='logo.png') }}" alt="โลโก้" style="height:64px">
+          <div><input type="file" name="logo_file" accept="image/png,image/jpeg">
+            {% if settings.logo %}<label class="check"><input type="checkbox" name="logo_reset" value="1"> ใช้โลโก้เดิมของระบบ</label>{% endif %}</div>
+        </div></div>
     </div>
     <div class="card">
       <h2>รอบบิลและเบี้ยปรับ</h2>

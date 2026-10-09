@@ -16,6 +16,8 @@
 <form method="post">
   {{ csrf() }}
   <input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="charge_type_id" value="{{ ct.id }}">
+  <div class="filters" style="margin-bottom:1rem"><div class="field"><label>วันที่จดมิเตอร์</label><input type="date" name="read_date" value="{{ read_date }}" required></div>
+    <span class="help">วันที่นี้จะแสดงในใบแจ้งหนี้/ใบเสร็จ (จดครั้งก่อนวันที่ / จดครั้งหลังวันที่)</span></div>
   <div class="card"><div class="table-wrap"><table>
     <thead><tr><th>ห้อง</th><th>ชื่อ</th><th class="num">เลขครั้งก่อน</th><th class="num">เลขครั้งนี้</th><th>เริ่มใหม่</th><th class="num">ใช้ไป</th><th class="num">ยอดเงิน (บาท)</th></tr></thead>
     <tbody>

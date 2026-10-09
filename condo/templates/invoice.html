@@ -9,7 +9,7 @@
     <button class="btn" onclick="window.print()">พิมพ์</button>
   </div>
 </div>
-{% include "_invoice_doc.html" %}
+{% set mode = "invoice" %}{% include "_bill_doc.html" %}
 
 <div class="card no-print" style="max-width:820px;margin:0 auto 1.25rem">
   <h2>ประวัติการชำระเงิน</h2>

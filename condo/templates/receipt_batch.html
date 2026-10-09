@@ -18,9 +18,9 @@
     <button class="btn">แสดง</button>
   </form>
 </div>
-{% set compact = layout == 'half' %}{% set blank_rows = 0 if compact else 8 %}
+{% set compact = layout == 'half' %}
 {% for p, inv, items, unit in docs %}
-  <div class="{{ 'half-sheet' if compact }}">{% include "_receipt_doc.html" %}</div>
+  <div class="{{ 'half-sheet' if compact }}">{% set mode = "receipt" %}{% include "_bill_doc.html" %}</div>
   {% if not loop.last and (not compact or loop.index is even) %}<div class="page-break"></div>{% endif %}
 {% else %}
   <div class="card">ไม่มีใบเสร็จในเดือนนี้</div>

@@ -195,6 +195,13 @@ def build_unit_items(db, unit, period, charge_types, selections):
                 missing.append(ct["name"])
                 continue
         item = compute_item(ct, unit, reading, sel.get(unit["id"]))
+        if reading is not None:
+            prev = db.execute(
+                "SELECT read_date, recorded_at FROM meter_readings WHERE charge_type_id=? AND unit_id=? AND period<?"
+                " ORDER BY period DESC LIMIT 1", (ct["id"], unit["id"], period),
+            ).fetchone()
+            item["meter_curr_date"] = reading["read_date"] or reading["recorded_at"][:10]
+            item["meter_prev_date"] = (prev["read_date"] or prev["recorded_at"][:10]) if prev else None
         items.append(item)
 
     adhoc = db.execute(
@@ -218,7 +225,7 @@ def load_selections(db):
 
 
 ITEM_COLUMNS = ("charge_type_id", "description", "detail", "quantity", "unit_label", "unit_price", "amount",
-                "vat_amount", "sort_order", "kind", "meter_prev", "meter_curr")
+                "vat_amount", "sort_order", "kind", "meter_prev", "meter_curr", "meter_prev_date", "meter_curr_date")
 
 
 def insert_item(db, invoice_id, item):
@@ -387,6 +394,19 @@ def bahttext(amount):
     text = (_thai_number(baht, baht) + "บาท") if baht else ""
     text += (_thai_number(satang, satang) + "สตางค์") if satang else "ถ้วน"
     return sign + text
+
+
+THAI_MONTHS_SHORT = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+                     "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
+
+
+def thai_date_short(value):
+    """'2026-10-08' -> '8 ต.ค. 69'"""
+    try:
+        d = date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return value or ""
+    return f"{d.day} {THAI_MONTHS_SHORT[d.month]} {(d.year + 543) % 100:02d}"
 
 
 def thai_date(value):

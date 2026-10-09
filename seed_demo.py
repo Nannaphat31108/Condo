@@ -43,8 +43,8 @@ def main():
                 for u in units:
                     prev = last.get((m["id"], u["id"]), rnd.randint(100, 900))
                     curr = prev + (rnd.randint(3, 15) if "น้ำ" in m["name"] else rnd.randint(80, 300))
-                    db.execute("INSERT INTO meter_readings (charge_type_id, unit_id, period, prev_reading, curr_reading)"
-                               " VALUES (?,?,?,?,?)", (m["id"], u["id"], period, prev, curr))
+                    db.execute("INSERT INTO meter_readings (charge_type_id, unit_id, period, prev_reading, curr_reading,"
+                               " read_date) VALUES (?,?,?,?,?,?)", (m["id"], u["id"], period, prev, curr, f"{period}-08"))
                     last[(m["id"], u["id"])] = curr
             db.commit()
             billing.generate_invoices(db, period, get_settings())

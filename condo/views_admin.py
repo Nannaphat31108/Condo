@@ -1,4 +1,5 @@
 """หน้าจอสำหรับผู้ดูแลระบบ (นิติบุคคล)"""
+import base64
 import csv
 import io
 import json
@@ -445,6 +446,7 @@ def meters():
 
     if request.method == "POST":
         errors, saved = [], 0
+        read_date = request.form.get("read_date") or date.today().isoformat()
         for unit in units_list:
             prev_raw = request.form.get(f"prev_{unit['id']}", "").strip()
             curr_raw = request.form.get(f"curr_{unit['id']}", "").strip()
@@ -464,16 +466,17 @@ def meters():
                 "SELECT * FROM meter_readings WHERE charge_type_id=? AND unit_id=? AND period=?",
                 (ct["id"], unit["id"], period),
             ).fetchone()
-            if invoiced and existing and (existing["prev_reading"], existing["curr_reading"]) != (prev, curr):
-                errors.append(f"ห้อง {unit['unit_no']}: ออกบิล {invoiced['invoice_no']} ไปแล้ว"
-                              " ต้องยกเลิกบิลก่อนจึงแก้เลขมิเตอร์ได้")
+            if invoiced and existing:
+                if (existing["prev_reading"], existing["curr_reading"]) != (prev, curr):
+                    errors.append(f"ห้อง {unit['unit_no']}: ออกบิล {invoiced['invoice_no']} ไปแล้ว"
+                                  " ต้องยกเลิกบิลก่อนจึงแก้เลขมิเตอร์ได้")
                 continue
             db.execute(
-                "INSERT INTO meter_readings (charge_type_id, unit_id, period, prev_reading, curr_reading)"
-                " VALUES (?,?,?,?,?) ON CONFLICT (charge_type_id, unit_id, period) DO UPDATE SET"
+                "INSERT INTO meter_readings (charge_type_id, unit_id, period, prev_reading, curr_reading, read_date)"
+                " VALUES (?,?,?,?,?,?) ON CONFLICT (charge_type_id, unit_id, period) DO UPDATE SET"
                 " prev_reading=excluded.prev_reading, curr_reading=excluded.curr_reading,"
-                " recorded_at=datetime('now','localtime')",
-                (ct["id"], unit["id"], period, prev, curr),
+                " read_date=excluded.read_date, recorded_at=datetime('now','localtime')",
+                (ct["id"], unit["id"], period, prev, curr, read_date),
             )
             saved += 1
         log_activity(g.user, f"บันทึกมิเตอร์ {ct['name']} งวด {period} จำนวน {saved} ห้อง")
@@ -501,7 +504,9 @@ def meters():
         preview = billing.compute_item(ct, unit, {"prev_reading": prev, "curr_reading": curr}) if reading else None
         rows.append({"unit": unit, "prev": prev, "curr": curr, "preview": preview,
                      "invoiced": unit["id"] in invoiced})
-    return render_template("admin/meters.html", meter_types=meter_types, ct=ct, period=period, rows=rows)
+    read_date = next((r["read_date"] for r in current.values() if r["read_date"]), date.today().isoformat())
+    return render_template("admin/meters.html", meter_types=meter_types, ct=ct, period=period, rows=rows,
+                           read_date=read_date)
 
 
 # ---------------------------------------------------------------- adhoc charges
@@ -965,8 +970,18 @@ def export_payments():
 def settings_page():
     db = get_db()
     if request.method == "POST":
+        upload = request.files.get("logo_file")
+        logo = get_settings().get("logo", "")
+        if request.form.get("logo_reset"):
+            logo = ""
+        elif upload and upload.filename:
+            data = upload.read()
+            if upload.mimetype not in ("image/png", "image/jpeg", "image/gif", "image/webp") or len(data) > 1_000_000:
+                flash("โลโก้ต้องเป็นไฟล์รูป PNG/JPG ขนาดไม่เกิน 1 MB", "error")
+                return redirect(url_for("admin.settings_page"))
+            logo = f"data:{upload.mimetype};base64,{base64.b64encode(data).decode()}"
         for key in DEFAULT_SETTINGS:
-            value = request.form.get(key, "").strip()
+            value = logo if key == "logo" else request.form.get(key, "").strip()
             if key in ("issue_day", "due_days"):
                 value = str(max(int(to_float(value, 1)), 0))
             if key == "penalty_types":

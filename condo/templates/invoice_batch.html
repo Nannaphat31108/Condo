@@ -6,7 +6,7 @@
   <div class="actions"><a class="btn" href="{{ url_for('admin.billing_page', period=period) }}">กลับ</a><button class="btn btn-primary" onclick="window.print()">พิมพ์ทั้งหมด</button></div>
 </div>
 {% for inv, items, payments, unit in docs %}
-  {% include "_invoice_doc.html" %}
+  {% set mode = "invoice" %}{% include "_bill_doc.html" %}
   {% if not loop.last %}<div class="page-break"></div>{% endif %}
 {% else %}
   <div class="card">ไม่มีใบแจ้งหนี้ในงวดนี้</div>
