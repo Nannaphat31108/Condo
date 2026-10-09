@@ -57,6 +57,8 @@ def login():
         password = request.form.get("password", "")
         db = get_db()
         user = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        if user is None:  # มือถือมักพิมพ์ตัวแรกเป็นตัวใหญ่ให้เอง
+            user = db.execute("SELECT * FROM users WHERE lower(username)=lower(?)", (username,)).fetchone()
         if user is None or not check_password_hash(user["password_hash"], password):
             flash("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง", "error")
         elif not user["active"]:

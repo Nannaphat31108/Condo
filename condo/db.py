@@ -212,6 +212,15 @@ def init_db(db):
             "INSERT INTO users (username, password_hash, full_name, role) VALUES (?, ?, ?, 'admin')",
             ("admin", generate_password_hash(os.environ.get("CONDO_ADMIN_PASSWORD") or "admin123"), "ผู้ดูแลระบบ"),
         )
+    reset = os.environ.get("CONDO_RESET_ADMIN_PASSWORD")
+    if reset:
+        # ลืมรหัสผ่าน: ตั้งตัวแปรนี้แล้วรีสตาร์ท ระบบจะตั้งรหัส admin ใหม่ (ลบตัวแปรออกหลังเข้าได้แล้ว)
+        if db.execute("SELECT 1 FROM users WHERE username='admin'").fetchone():
+            db.execute("UPDATE users SET password_hash=?, role='admin', active=1 WHERE username='admin'",
+                       (generate_password_hash(reset),))
+        else:
+            db.execute("INSERT INTO users (username, password_hash, full_name, role) VALUES ('admin', ?, ?, 'admin')",
+                       (generate_password_hash(reset), "ผู้ดูแลระบบ"))
     if db.execute("SELECT COUNT(*) FROM charge_types").fetchone()[0] == 0:
         for ct in DEFAULT_CHARGE_TYPES:
             ct = {"fixed_fee": 0, "min_charge": 0, **ct, "tiers": json.dumps([])}
