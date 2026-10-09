@@ -24,15 +24,8 @@
   {% else %}<p class="muted">ยังไม่มีบัญชี ลูกบ้านจะเข้าดูบิลของตัวเองได้เมื่อสร้างบัญชีให้</p>{% endfor %}
 </div>
 <div class="card">
-  <h2>ประวัติใบแจ้งหนี้</h2>
-  <div class="table-wrap"><table>
-    <thead><tr><th>งวด</th><th>เลขที่</th><th>ครบกำหนด</th><th class="num">ยอดรวม</th><th class="num">ชำระแล้ว</th><th>สถานะ</th></tr></thead>
-    <tbody>
-    {% for i in invoices %}
-      <tr><td>{{ i.period|period }}</td><td><a href="{{ url_for('admin.invoice_detail', invoice_id=i.id) }}">{{ i.invoice_no }}</a></td><td>{{ i.due_date }}</td><td class="num">{{ i.total|baht }}</td><td class="num">{{ i.paid_amount|baht }}</td><td>{{ status_badge(i.status) }}</td></tr>
-    {% else %}<tr><td colspan="6" class="muted">ยังไม่มีใบแจ้งหนี้</td></tr>{% endfor %}
-    </tbody>
-  </table></div>
+  <h2>ประวัติรายเดือน</h2>
+  {% include "admin/_unit_history.html" %}
 </div>
 <div class="card">
   <h2>ประวัติเลขมิเตอร์</h2>

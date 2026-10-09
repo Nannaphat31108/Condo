@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}ประวัติห้อง {{ unit.unit_no }}{% endblock %}
+{% block content %}
+<div class="page-head"><h1>ประวัติห้อง {{ unit.unit_no }}</h1>
+  <div class="actions no-print"><a class="btn" href="{{ url_for('admin.unit_detail', unit_id=unit.id) }}">ข้อมูลห้อง</a><button class="btn" onclick="window.print()">พิมพ์</button></div></div>
+<div class="card">{% include "admin/_unit_history.html" %}</div>
+{% endblock %}

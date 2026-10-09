@@ -683,3 +683,30 @@ def test_daily_report(app, client):
     assert lines[1].startswith("2026-10-05,2,375.0") and lines[1].endswith(",457.5")
     assert lines[2].startswith("2026-10-07,1,125.0") and lines[2].endswith(",152.5")
     assert client.get("/admin/reports/daily").status_code == 200
+
+
+def test_unit_history(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/new", {"unit_no": "26/1", "unit_type": "room", "owner_name": "สมชาย", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        uid = db.execute("SELECT id FROM units").fetchone()[0]
+        water = db.execute("SELECT id FROM charge_types WHERE name='ค่าน้ำประปา'").fetchone()[0]
+    for period, curr in (("2026-09", "3"), ("2026-10", "10")):
+        form = sheet_form(client, f"/admin/sheet?period={period}&type=room")
+        form.update({f"prev_{water}_{uid}": "0" if period == "2026-09" else "3", f"curr_{water}_{uid}": curr,
+                     "action": "bill"})
+        s.post("/admin/sheet", form)
+    with app.app_context():
+        sep = get_db().execute("SELECT * FROM invoices WHERE period='2026-09'").fetchone()
+    s.post(f"/admin/invoices/{sep['id']}/pay", {"amount": str(sep["total"]), "paid_at": "2026-09-20"})
+    part = client.get(f"/admin/units/{uid}/history?partial=1").get_data(as_text=True)
+    assert "<html" not in part and "กันยายน 2569" in part and "ตุลาคม 2569" in part
+    assert "ใช้น้ำประปา 3 หน่วย" in part and "ใช้น้ำประปา 7 หน่วย" in part
+    assert "0001/09/2026" in part                     # เลขใบเสร็จของงวด ก.ย.
+    assert "ค้างชำระ" in part and "112.00" in part     # น้ำ 7×16=112 อยู่ในงวด ต.ค.
+    assert client.get(f"/admin/units/{uid}/history").status_code == 200
+    assert "ประวัติรายเดือน" in client.get(f"/admin/units/{uid}").get_data(as_text=True)
+    assert "data-history" in client.get("/admin/sheet?period=2026-10&type=room").get_data(as_text=True)
+    assert "data-history" in client.get("/admin/units").get_data(as_text=True)

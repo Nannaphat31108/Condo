@@ -27,7 +27,8 @@
       <td class="small">{{ u.usernames or '-' }}</td>
       <td class="num">{% if u.outstanding %}<span style="color:var(--danger)">{{ u.outstanding|baht }}</span>{% else %}-{% endif %}</td>
       <td>{% if u.active %}<span class="badge on">ใช้งาน</span>{% else %}<span class="badge off">ปิด</span>{% endif %}</td>
-      <td class="nowrap"><a class="btn btn-sm" href="{{ url_for('admin.unit_form', unit_id=u.id) }}">แก้ไข</a></td>
+      <td class="nowrap"><a class="btn btn-sm" href="{{ url_for('admin.unit_history_page', unit_id=u.id) }}" data-history="{{ url_for('admin.unit_history_page', unit_id=u.id, partial=1) }}">ประวัติ</a>
+        <a class="btn btn-sm" href="{{ url_for('admin.unit_form', unit_id=u.id) }}">แก้ไข</a></td>
     </tr>
   {% else %}
     <tr><td colspan="9" class="muted">ยังไม่มีข้อมูลห้อง — <a href="{{ url_for('admin.unit_form') }}">เพิ่มห้อง</a> หรือ <a href="{{ url_for('admin.unit_import') }}">นำเข้าหลายห้อง</a></td></tr>

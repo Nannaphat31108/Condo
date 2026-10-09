@@ -1,0 +1,31 @@
+{# ตารางประวัติรายเดือนของห้อง: ต้องมี unit, history #}
+{% from "_macros.html" import status_badge %}
+<div class="history">
+  <div class="history-head">
+    <div><b class="history-room">{{ unit.unit_no }}</b>
+      <span class="muted small">{{ unit.owner_name or '' }}{% if unit.tenant_name %} · ผู้เช่า {{ unit.tenant_name }}{% endif %}</span></div>
+    <div class="history-sum">
+      <span>ค้างชำระ <b class="{{ 'due' if history.outstanding.amount > 0 }}">{{ history.outstanding.amount|baht }}</b> บาท
+        {% if history.outstanding.cnt %}({{ history.outstanding.cnt }} บิล){% endif %}</span>
+      <span>ชำระแล้วรวม <b>{{ history.paid_total|baht }}</b> บาท</span>
+    </div>
+  </div>
+  <div class="table-wrap"><table class="history-table">
+    <thead><tr><th>งวด</th>{% for c in history.columns %}<th class="num">{{ c }}</th>{% endfor %}<th class="num">รวม</th><th class="num">ชำระแล้ว</th><th>สถานะ / ใบเสร็จ</th></tr></thead>
+    <tbody>
+    {% for r in history.rows %}{% set inv = r.inv %}
+      <tr>
+        <td class="nowrap"><a href="{{ url_for('admin.invoice_detail', invoice_id=inv.id) }}" target="_top">{{ inv.period|period }}</a>
+          {% if r.usage %}<div class="muted small">ใช้{{ r.usage|join(', ') }} หน่วย</div>{% endif %}</td>
+        {% for c in history.columns %}<td class="num">{{ r.amounts[c]|baht if r.amounts.get(c) else '—' }}</td>{% endfor %}
+        <td class="num"><b>{{ inv.total|baht }}</b></td>
+        <td class="num">{{ inv.paid_amount|baht }}</td>
+        <td>{{ status_badge(inv.status) }}
+          {% for p in r.payments %}<div class="small"><a href="{{ url_for('admin.receipt', payment_id=p.id) }}" target="_top">{{ p.receipt_no }}</a> · {{ p.paid_at|thaidate_short }} · {{ p.amount|baht }}</div>{% endfor %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="{{ history.columns|length + 4 }}" class="muted">ยังไม่มีประวัติใบแจ้งหนี้</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>

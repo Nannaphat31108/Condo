@@ -55,7 +55,8 @@
     <tbody>
     {% for row in rows %}{% set u = row.unit %}{% set inv = row.inv %}{% set uid = u.id %}
       <tr data-find="{{ u.unit_no }} {{ u.owner_name }} {{ u.tenant_name }}" class="{{ 'billed' if inv }}">
-        <td class="sticky"><b>{{ u.unit_no }}</b><div class="who">{{ u.tenant_name or u.owner_name }}</div>
+        <td class="sticky"><b>{{ u.unit_no }}</b> <a href="{{ url_for('admin.unit_history_page', unit_id=uid) }}" class="hist-link" data-history="{{ url_for('admin.unit_history_page', unit_id=uid, partial=1) }}">ประวัติ</a>
+          <div class="who">{{ u.tenant_name or u.owner_name }}</div>
           {% if row.editable %}<input type="hidden" name="row_{{ uid }}" value="1">{% endif %}</td>
         {% for col in cols %}{% set ct = col.ct %}{% set c = row.cells[ct.id] %}
           {% set live_meter = col.kind == 'meter' and not inv and c.applies %}

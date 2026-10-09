@@ -68,6 +68,31 @@ document.addEventListener('submit', function (e) {
   if (msg && !confirm(msg)) e.preventDefault();
 });
 </script>
+<div class="history-modal" id="history-modal" role="dialog" aria-modal="true" aria-label="ประวัติห้อง">
+  <div class="history-box"><div class="history-bar"><b>ประวัติห้อง</b><span><a href="#" id="history-full" class="btn btn-sm">เปิดเต็มหน้า</a> <button type="button" class="btn btn-sm" id="history-close">ปิด</button></span></div>
+    <div id="history-body">กำลังโหลด…</div></div>
+</div>
+<script>
+// ปุ่ม "ประวัติ" (data-history): เปิดประวัติห้องในหน้าต่างป๊อปอัป ไม่ต้องออกจากหน้าที่กรอกอยู่
+(function () {
+  var modal = document.getElementById('history-modal'), body = document.getElementById('history-body');
+  function close() { modal.classList.remove('open'); }
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest('[data-history]');
+    if (!a) return;
+    e.preventDefault();
+    body.textContent = 'กำลังโหลด…';
+    document.getElementById('history-full').href = a.getAttribute('href');
+    modal.classList.add('open');
+    fetch(a.dataset.history, {credentials: 'same-origin'}).then(function (r) { return r.text(); })
+      .then(function (html) { body.innerHTML = html; })
+      .catch(function () { body.textContent = 'โหลดไม่สำเร็จ ลองใหม่อีกครั้ง'; });
+  });
+  document.getElementById('history-close').addEventListener('click', close);
+  modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+})();
+</script>
 <div class="print-modal" id="print-modal" role="dialog" aria-modal="true" aria-labelledby="print-modal-title">
   <form id="print-form">
     <h2 id="print-modal-title">ตั้งค่าการพิมพ์</h2>

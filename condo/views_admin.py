@@ -248,7 +248,55 @@ def unit_detail(unit_id):
         (unit_id,),
     ).fetchall()
     users = db.execute("SELECT * FROM users WHERE unit_id=?", (unit_id,)).fetchall()
-    return render_template("admin/unit_detail.html", unit=unit, invoices=invoices, readings=readings, users=users)
+    return render_template("admin/unit_detail.html", unit=unit, invoices=invoices, readings=readings, users=users,
+                           history=unit_history(db, unit_id))
+
+
+def unit_history(db, unit_id, limit=24):
+    """ประวัติรายเดือนของห้อง: แต่ละงวดเรียกเก็บอะไรเท่าไหร่ ใช้น้ำกี่หน่วย จ่ายแล้ว/ค้างเท่าไหร่"""
+    invoices = db.execute(
+        "SELECT * FROM invoices WHERE unit_id=? AND status!='void' ORDER BY period DESC, id DESC LIMIT ?",
+        (unit_id, limit)).fetchall()
+    ids = [i["id"] for i in invoices]
+    items, payments = {}, {}
+    if ids:
+        marks = ",".join("?" * len(ids))
+        for it in db.execute(f"SELECT ii.*, c.sort_order AS ct_order FROM invoice_items ii"
+                             f" LEFT JOIN charge_types c ON c.id=ii.charge_type_id WHERE ii.invoice_id IN ({marks})",
+                             ids):
+            items.setdefault(it["invoice_id"], []).append(it)
+        for p in db.execute(f"SELECT * FROM payments WHERE invoice_id IN ({marks}) ORDER BY paid_at, id", ids):
+            payments.setdefault(p["invoice_id"], []).append(p)
+    # คอลัมน์: ค่าบริการตามลำดับ แล้วตามด้วยเบี้ยปรับ / รายการอื่น
+    order = {}
+    for its in items.values():
+        for it in its:
+            key = it["ct_order"] if it["ct_order"] is not None else (950 if it["kind"] == "penalty" else 900)
+            order[it["description"]] = min(order.get(it["description"], key), key)
+    columns = sorted(order, key=lambda n: (order[n], n))
+    rows = []
+    for inv in invoices:
+        amounts, usage = {}, []
+        for it in items.get(inv["id"], []):
+            amounts[it["description"]] = amounts.get(it["description"], 0) + it["amount"] + it["vat_amount"]
+            if it["meter_curr"] is not None:
+                usage.append(f"{it['description'].replace('ค่า', '', 1)} {billing.fmt_num(it['quantity'])}")
+        rows.append({"inv": inv, "amounts": amounts, "usage": usage, "payments": payments.get(inv["id"], [])})
+    outstanding = db.execute(
+        "SELECT COALESCE(SUM(total-paid_amount),0) AS amount, COUNT(*) AS cnt FROM invoices WHERE unit_id=?"
+        " AND status IN ('unpaid','partial')", (unit_id,)).fetchone()
+    paid_total = sum(r["inv"]["paid_amount"] for r in rows)
+    return {"rows": rows, "columns": columns, "outstanding": outstanding, "paid_total": paid_total}
+
+
+@bp.route("/units/<int:unit_id>/history")
+@admin_required
+def unit_history_page(unit_id):
+    """ประวัติห้อง (ใช้ในหน้าต่างป๊อปอัปของหน้ากรอกรวม เมื่อส่ง ?partial=1)"""
+    db = get_db()
+    unit = get_or_404("SELECT * FROM units WHERE id=?", (unit_id,))
+    template = "admin/_unit_history.html" if request.args.get("partial") else "admin/unit_history.html"
+    return render_template(template, unit=unit, history=unit_history(db, unit_id))
 
 
 def reset_unit_data(db, unit_id, clear_contacts=False):
