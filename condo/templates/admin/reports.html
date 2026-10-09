@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>รายงาน / ข้อมูลย้อนหลัง ปี {{ year + 543 }}</h1>
+  <div class="actions">
+    <form method="get" class="filters"><select name="year" onchange="this.form.submit()">{% for y in years %}<option value="{{ y }}" {{ 'selected' if y|int == year }}>{{ y|int + 543 }}</option>{% endfor %}</select></form>
+    <a class="btn" href="{{ url_for('admin.export_invoices', year=year) }}">ส่งออกใบแจ้งหนี้ (CSV)</a>
+    <a class="btn" href="{{ url_for('admin.export_items', year=year) }}">ส่งออกรายการในบิล (CSV)</a>
+    <a class="btn" href="{{ url_for('admin.export_payments') }}">ส่งออกการรับชำระ (CSV)</a>
+    <a class="btn" href="{{ url_for('admin.backup') }}">สำรองฐานข้อมูล</a>
+  </div>
+</div>
+<div class="grid grid-2">
+  <div class="card">
+    <h2>สรุปรายเดือน</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>งวด</th><th class="num">จำนวนบิล</th><th class="num">เรียกเก็บ</th><th class="num">ชำระแล้ว</th><th class="num">คงค้าง</th></tr></thead>
+      <tbody>{% for m in by_month %}<tr><td><a href="{{ url_for('admin.invoices', period=m.period) }}">{{ m.period|period }}</a></td><td class="num">{{ m.cnt }}</td><td class="num">{{ m.total|baht }}</td><td class="num">{{ m.paid|baht }}</td><td class="num">{{ m.outstanding|baht }}</td></tr>
+      {% else %}<tr><td colspan="5" class="muted">ไม่มีข้อมูล</td></tr>{% endfor %}</tbody>
+      {% if by_month %}<tfoot><tr><td>รวมทั้งปี</td><td class="num">{{ by_month|sum(attribute='cnt') }}</td><td class="num">{{ by_month|sum(attribute='total')|baht }}</td><td class="num">{{ by_month|sum(attribute='paid')|baht }}</td><td class="num">{{ by_month|sum(attribute='outstanding')|baht }}</td></tr></tfoot>{% endif %}
+    </table></div>
+  </div>
+  <div class="card">
+    <h2>แยกตามประเภทค่าใช้จ่าย</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>รายการ</th><th class="num">จำนวนรายการ</th><th class="num">ยอดรวม (รวม VAT)</th></tr></thead>
+      <tbody>{% for r in by_item %}<tr><td>{{ r.description }}</td><td class="num">{{ r.cnt }}</td><td class="num">{{ r.total|baht }}</td></tr>
+      {% else %}<tr><td colspan="3" class="muted">ไม่มีข้อมูล</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <h2>รับชำระตามเดือน / ช่องทาง</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>เดือน</th><th>ช่องทาง</th><th class="num">จำนวน</th><th class="num">ยอดเงิน</th></tr></thead>
+      <tbody>{% for r in collections %}<tr><td>{{ r.month|period }}</td><td>{{ r.method }}</td><td class="num">{{ r.cnt }}</td><td class="num">{{ r.total|baht }}</td></tr>
+      {% else %}<tr><td colspan="4" class="muted">ไม่มีข้อมูล</td></tr>{% endfor %}</tbody>
+      {% if collections %}<tfoot><tr><td colspan="3">รวม</td><td class="num">{{ collections|sum(attribute='total')|baht }}</td></tr></tfoot>{% endif %}
+    </table></div>
+  </div>
+  <div class="card">
+    <h2>ลูกหนี้ค้างชำระ (ทุกงวด)</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>ห้อง</th><th>ชื่อ</th><th class="num">จำนวนบิล</th><th>ค้างตั้งแต่</th><th class="num">ยอดค้าง</th></tr></thead>
+      <tbody>{% for r in outstanding %}<tr><td><a href="{{ url_for('admin.unit_detail', unit_id=r.unit_id) }}">{{ r.unit_no }}</a></td><td>{{ r.owner_name }}</td><td class="num">{{ r.cnt }}</td><td>{{ r.oldest|period }}</td><td class="num">{{ r.amount|baht }}</td></tr>
+      {% else %}<tr><td colspan="5" class="muted">ไม่มียอดค้าง</td></tr>{% endfor %}</tbody>
+      {% if outstanding %}<tfoot><tr><td colspan="4">รวม</td><td class="num">{{ outstanding|sum(attribute='amount')|baht }}</td></tr></tfoot>{% endif %}
+    </table></div>
+  </div>
+</div>
+{% endblock %}

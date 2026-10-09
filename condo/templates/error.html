@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card"><h1>เกิดข้อผิดพลาด</h1><p>{{ message }}</p><a class="btn" href="{{ url_for('index') }}">กลับหน้าหลัก</a></div>
+{% endblock %}
+{% block public %}
+<div class="login-wrap"><div class="card login-card"><h1>เกิดข้อผิดพลาด</h1><p>{{ message }}</p><a class="btn" href="{{ url_for('auth.login') }}">ไปหน้าเข้าสู่ระบบ</a></div></div>
+{% endblock %}

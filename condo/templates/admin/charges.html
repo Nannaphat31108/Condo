@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_macros.html" import post_button %}
+{% block content %}
+<div class="page-head">
+  <h1>ตั้งค่าค่าบริการ / วิธีคิดเงิน</h1>
+  <a class="btn btn-primary" href="{{ url_for('admin.charge_form') }}">+ เพิ่มค่าบริการ</a>
+</div>
+<p class="muted">กำหนดว่าแต่ละรายการคิดเงินอย่างไร เช่น ค่าน้ำ/ค่าไฟคิดตามมิเตอร์ (อัตราเดียวหรือขั้นบันได), ค่าขยะ/ค่าประกันเหมาจ่าย, ค่าส่วนกลางตามพื้นที่
+  — ระบบจะใช้ค่าที่ตั้งไว้คำนวณบิลทุกห้องโดยอัตโนมัติ การแก้ไขอัตราจะมีผลกับบิลที่ออกใหม่เท่านั้น บิลเก่ายังคงเดิม</p>
+<div class="card"><div class="table-wrap"><table>
+  <thead><tr><th>ลำดับ</th><th>รายการ</th><th>วิธีคิด</th><th>อัตรา</th><th>ความถี่</th><th>ใช้กับ</th><th>สถานะ</th><th></th></tr></thead>
+  <tbody>
+  {% for c in charges %}
+    <tr>
+      <td>{{ c.sort_order }}</td>
+      <td><b>{{ c.name }}</b>{% if c.description %}<div class="muted small">{{ c.description }}</div>{% endif %}</td>
+      <td>{{ METHOD_LABELS[c.method] }}</td>
+      <td class="small">
+        {% if c.method == 'meter_tiered' %}
+          {% for t in parse_tiers(c.tiers) %}{{ 'เกิน ' ~ (loop.previtem.upto|num) ~ ' ' if not loop.first }}{{ ('ถึง ' ~ (t.upto|num)) if t.upto is not none else ('ขึ้นไป' if not loop.first else 'ทุกหน่วย') }}: {{ t.rate|num }} บ.<br>{% endfor %}
+        {% elif c.method == 'fixed' %}{{ c.rate|baht }} บาท
+        {% else %}{{ c.rate|num }} บาท/{{ c.unit_label or 'หน่วย' }}{% endif %}
+        {% if c.fixed_fee %}<br>+ ค่าบริการ {{ c.fixed_fee|num }}{% endif %}
+        {% if c.min_charge %}<br>ขั้นต่ำ {{ c.min_charge|num }}{% endif %}
+        {% if c.vat_percent %}<br>VAT {{ c.vat_percent|num }}%{% endif %}
+      </td>
+      <td class="small">{{ FREQUENCY_LABELS[c.frequency] }}{% if c.frequency == 'yearly' %} (เดือน{{ THAI_MONTHS[c.bill_month or 1] }}){% endif %}
+        {% if c.start_period or c.end_period %}<br>{{ c.start_period|period if c.start_period else '...' }} – {{ c.end_period|period if c.end_period else '...' }}{% endif %}</td>
+      <td class="small">{{ 'ทุกห้อง' if c.apply_to == 'all' else ('เฉพาะ ' ~ c.unit_count ~ ' ห้อง') }}</td>
+      <td>{% if c.active %}<span class="badge on">ใช้งาน</span>{% else %}<span class="badge off">ปิด</span>{% endif %}</td>
+      <td class="nowrap">
+        <a class="btn btn-sm" href="{{ url_for('admin.charge_form', charge_id=c.id) }}">แก้ไข</a>
+        {{ post_button(url_for('admin.charge_delete', charge_id=c.id), 'ลบ', 'ยืนยันลบ ' ~ c.name ~ ' ? (ประวัติมิเตอร์ของรายการนี้จะถูกลบด้วย แนะนำให้ปิดใช้งานแทน)', 'btn btn-sm btn-danger') }}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% endblock %}

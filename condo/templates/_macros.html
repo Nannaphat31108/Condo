@@ -1,0 +1,14 @@
+{% macro csrf() %}<input type="hidden" name="_csrf" value="{{ csrf_token() }}">{% endmacro %}
+{% macro status_badge(status) %}<span class="badge {{ status }}">{{ STATUS_LABELS[status] }}</span>{% endmacro %}
+{% macro post_button(action, label, confirm=None, cls='btn btn-sm') %}
+<form method="post" action="{{ action }}" class="inline"{% if confirm %} data-confirm="{{ confirm }}"{% endif %}>
+  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+  <button type="submit" class="{{ cls }}">{{ label }}</button>
+</form>
+{% endmacro %}
+{% macro period_picker(period, extra={}) %}
+<form method="get" class="filters">
+  {% for k, v in extra.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  <div class="field"><label>งวดเดือน</label><input type="month" name="period" value="{{ period }}" onchange="this.form.submit()"></div>
+</form>
+{% endmacro %}

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_badge, post_button %}
+{% block content %}
+<div class="page-head">
+  <h1>ห้อง {{ unit.unit_no }} {% if not unit.active %}<span class="badge off">ปิดใช้งาน</span>{% endif %}</h1>
+  <div class="actions">
+    <a class="btn" href="{{ url_for('admin.unit_form', unit_id=unit.id) }}">แก้ไขข้อมูล</a>
+    <a class="btn" href="{{ url_for('admin.user_form', unit_id=unit.id) }}">+ สร้างบัญชีลูกบ้าน</a>
+    {% if not invoices %}{{ post_button(url_for('admin.unit_delete', unit_id=unit.id), 'ลบห้อง', 'ยืนยันลบห้อง ' ~ unit.unit_no ~ ' ?', 'btn btn-danger') }}{% endif %}
+  </div>
+</div>
+<div class="grid grid-3" style="margin-bottom:1.25rem">
+  <div class="stat"><div class="label">เจ้าของ / ผู้พักอาศัย</div><div class="value" style="font-size:1.1rem">{{ unit.owner_name or '-' }}</div><div class="sub">{{ unit.phone }} {{ unit.email }}</div></div>
+  <div class="stat"><div class="label">อาคาร / ชั้น / พื้นที่</div><div class="value" style="font-size:1.1rem">{{ unit.building or '-' }} / {{ unit.floor or '-' }} / {{ unit.area_sqm|num }} ตร.ม.</div></div>
+  {% set due = invoices|selectattr('status', 'in', ['unpaid', 'partial'])|list %}
+  <div class="stat"><div class="label">ค้างชำระ</div><div class="value">{{ (due|sum(attribute='total') - due|sum(attribute='paid_amount'))|baht }}</div><div class="sub">{{ due|length }} ใบแจ้งหนี้</div></div>
+</div>
+<div class="card">
+  <h2>บัญชีผู้ใช้ของห้องนี้</h2>
+  {% for u in users %}<div><a href="{{ url_for('admin.user_form', user_id=u.id) }}">{{ u.username }}</a> {{ u.full_name }} {% if not u.active %}<span class="badge off">ปิด</span>{% endif %}</div>
+  {% else %}<p class="muted">ยังไม่มีบัญชี ลูกบ้านจะเข้าดูบิลของตัวเองได้เมื่อสร้างบัญชีให้</p>{% endfor %}
+</div>
+<div class="card">
+  <h2>ประวัติใบแจ้งหนี้</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>งวด</th><th>เลขที่</th><th>ครบกำหนด</th><th class="num">ยอดรวม</th><th class="num">ชำระแล้ว</th><th>สถานะ</th></tr></thead>
+    <tbody>
+    {% for i in invoices %}
+      <tr><td>{{ i.period|period }}</td><td><a href="{{ url_for('admin.invoice_detail', invoice_id=i.id) }}">{{ i.invoice_no }}</a></td><td>{{ i.due_date }}</td><td class="num">{{ i.total|baht }}</td><td class="num">{{ i.paid_amount|baht }}</td><td>{{ status_badge(i.status) }}</td></tr>
+    {% else %}<tr><td colspan="6" class="muted">ยังไม่มีใบแจ้งหนี้</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+<div class="card">
+  <h2>ประวัติเลขมิเตอร์</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>งวด</th><th>ประเภท</th><th class="num">ครั้งก่อน</th><th class="num">ครั้งนี้</th><th class="num">ใช้ไป</th></tr></thead>
+    <tbody>
+    {% for r in readings %}
+      <tr><td>{{ r.period|period }}</td><td>{{ r.name }}</td><td class="num">{{ r.prev_reading|num }}</td><td class="num">{{ r.curr_reading|num }}</td><td class="num">{{ (r.curr_reading - r.prev_reading)|num }} {{ r.unit_label }}</td></tr>
+    {% else %}<tr><td colspan="5" class="muted">ยังไม่มีข้อมูล</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

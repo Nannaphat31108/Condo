@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_badge, period_picker %}
+{% block content %}
+<div class="page-head">
+  <h1>ภาพรวม</h1>
+  {{ period_picker(period) }}
+</div>
+<div class="grid grid-4" style="margin-bottom:1.25rem">
+  <div class="stat"><div class="label">ยอดเรียกเก็บ {{ period|period }}</div><div class="value">{{ stats.total|baht }}</div><div class="sub">{{ stats.cnt }} ใบแจ้งหนี้ / {{ unit_count }} ห้อง</div></div>
+  <div class="stat"><div class="label">เก็บได้แล้ว</div><div class="value">{{ stats.paid|baht }}</div><div class="sub">ชำระครบ {{ stats.paid_cnt or 0 }} ห้อง</div></div>
+  <div class="stat"><div class="label">คงค้างงวดนี้</div><div class="value">{{ (stats.total - stats.paid)|baht }}</div><div class="sub">{% if stats.total %}เก็บได้ {{ '%.0f'|format(stats.paid / stats.total * 100) }}%{% else %}ยังไม่ออกบิล{% endif %}</div></div>
+  <div class="stat"><div class="label">ค้างชำระสะสมทั้งหมด</div><div class="value">{{ outstanding.amount|baht }}</div><div class="sub">{{ outstanding.cnt }} ใบแจ้งหนี้</div></div>
+</div>
+
+{% if not stats.cnt %}
+<div class="flash info">งวด {{ period|period }} ยังไม่ได้ออกใบแจ้งหนี้ —
+  ขั้นตอน: <a href="{{ url_for('admin.meters', period=period) }}">1. จดมิเตอร์</a> →
+  <a href="{{ url_for('admin.adhoc', period=period) }}">2. เพิ่มรายการพิเศษ (ถ้ามี)</a> →
+  <a href="{{ url_for('admin.billing_page', period=period) }}">3. ออกใบแจ้งหนี้</a></div>
+{% endif %}
+
+<div class="grid grid-2">
+  <div class="card">
+    <div class="page-head" style="margin-bottom:0"><h2 style="margin:0">ยอดเรียกเก็บ 12 งวดล่าสุด</h2>
+      <div class="legend"><span class="l-total">เรียกเก็บ</span><span class="l-paid">ชำระแล้ว</span></div></div>
+    {% if monthly %}
+    <div class="bars">
+      {% for m in monthly %}
+      <div class="bar" title="{{ m.period|period }}: เรียกเก็บ {{ m.total|baht }} / ชำระ {{ m.paid|baht }}">
+        <div class="stack" style="height:{{ (m.total / peak * 100)|round(1) }}%">
+          <div class="paid" style="height:{{ ((m.paid / m.total * 100) if m.total else 0)|round(1) }}%"></div>
+        </div>
+        <div class="lbl">{{ m.period[5:] }}/{{ (m.period[:4]|int + 543) % 100 }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}<p class="muted">ยังไม่มีข้อมูล</p>{% endif %}
+  </div>
+  <div class="card">
+    <h2>บิลเกินกำหนดชำระ</h2>
+    {% if overdue %}
+    <div class="table-wrap"><table>
+      <thead><tr><th>ห้อง</th><th>งวด</th><th>ครบกำหนด</th><th class="num">คงค้าง</th></tr></thead>
+      <tbody>
+      {% for i in overdue %}
+        <tr><td><a href="{{ url_for('admin.invoice_detail', invoice_id=i.id) }}">{{ i.unit_no }}</a></td><td>{{ i.period|period }}</td><td>{{ i.due_date }}</td><td class="num">{{ (i.total - i.paid_amount)|baht }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    <a href="{{ url_for('admin.invoices', status='outstanding') }}" class="small">ดูทั้งหมด →</a>
+    {% else %}<p class="muted">ไม่มีบิลเกินกำหนด</p>{% endif %}
+  </div>
+</div>
+{% endblock %}

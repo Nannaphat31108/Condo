@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, status_badge, post_button %}
+{% block title %}{{ inv.invoice_no }}{% endblock %}
+{% block content %}
+<div class="page-head no-print">
+  <h1>ใบแจ้งหนี้ {{ inv.invoice_no }} {{ status_badge(inv.status) }}</h1>
+  <div class="actions">
+    {% if admin %}<a class="btn" href="{{ url_for('admin.unit_detail', unit_id=inv.unit_id) }}">ประวัติห้อง {{ inv.unit_no }}</a>{% endif %}
+    <button class="btn" onclick="window.print()">พิมพ์</button>
+  </div>
+</div>
+{% include "_invoice_doc.html" %}
+
+<div class="card no-print" style="max-width:820px;margin:0 auto 1.25rem">
+  <h2>ประวัติการชำระเงิน</h2>
+  {% if payments %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>เลขที่ใบเสร็จ</th><th>วันที่</th><th>ช่องทาง</th><th>อ้างอิง</th><th class="num">จำนวนเงิน</th><th></th></tr></thead>
+    <tbody>
+    {% for p in payments %}
+      <tr>
+        <td>{{ p.receipt_no }}</td><td>{{ p.paid_at }}</td><td>{{ p.method }}</td>
+        <td>{{ p.reference }}{% if p.note %} <span class="muted small">{{ p.note }}</span>{% endif %}</td>
+        <td class="num">{{ p.amount|baht }}</td>
+        <td class="nowrap">
+          <a class="btn btn-sm" href="{{ url_for('admin.receipt' if admin else 'resident.receipt', payment_id=p.id) }}">ใบเสร็จ</a>
+          {% if admin %}{{ post_button(url_for('admin.payment_delete', payment_id=p.id), 'ยกเลิก', 'ยืนยันยกเลิกรายการรับชำระ ' ~ p.receipt_no ~ ' ?', 'btn btn-sm btn-danger') }}{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="muted">ยังไม่มีการชำระเงิน</p>{% endif %}
+
+  {% if admin and inv.status in ('unpaid', 'partial') %}
+  <h3 style="margin-top:1.25rem">บันทึกรับชำระ</h3>
+  <form method="post" action="{{ url_for('admin.invoice_pay', invoice_id=inv.id) }}">
+    {{ csrf() }}
+    <div class="form-row">
+      <div class="field"><label>จำนวนเงิน</label><input type="number" step="0.01" min="0.01" name="amount" value="{{ '%.2f'|format(inv.total - inv.paid_amount) }}" required></div>
+      <div class="field"><label>วันที่ชำระ</label><input type="date" name="paid_at" value="{{ today }}" required></div>
+      <div class="field"><label>ช่องทาง</label>
+        <select name="method">{% for m in ['โอนเงิน', 'เงินสด', 'พร้อมเพย์', 'เช็ค', 'บัตรเครดิต', 'อื่น ๆ'] %}<option>{{ m }}</option>{% endfor %}</select></div>
+      <div class="field"><label>เลขอ้างอิง</label><input type="text" name="reference" placeholder="เช่น เลขที่สลิป"></div>
+    </div>
+    <div class="field"><label>หมายเหตุ</label><input type="text" name="note"></div>
+    <button class="btn btn-primary">บันทึกรับชำระ</button>
+  </form>
+  {% endif %}
+
+  {% if admin and inv.status != 'void' and not inv.paid_amount %}
+  <div style="margin-top:1.25rem;border-top:1px solid var(--line);padding-top:1rem">
+    {{ post_button(url_for('admin.invoice_void', invoice_id=inv.id), 'ยกเลิกใบแจ้งหนี้นี้', 'ยืนยันยกเลิกใบแจ้งหนี้ ' ~ inv.invoice_no ~ ' ? (สามารถออกบิลใหม่ได้ภายหลัง)', 'btn btn-danger') }}
+    <span class="help">ใช้เมื่อข้อมูลผิด เช่น จดมิเตอร์ผิด — ยกเลิกแล้วแก้ไขข้อมูล จากนั้นออกบิลใหม่</span>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

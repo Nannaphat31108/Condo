@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block content %}
+<h1>{{ 'แก้ไข ' ~ ct.name if charge_id else 'เพิ่มค่าบริการ' }}</h1>
+<form method="post" id="charge-form">
+  {{ csrf() }}
+  <div class="grid grid-2">
+    <div class="card">
+      <h2>ข้อมูลรายการ</h2>
+      <div class="form-row">
+        <div class="field"><label>ชื่อรายการ *</label><input type="text" name="name" value="{{ ct.name if ct else '' }}" required placeholder="เช่น ค่าน้ำ, ค่าที่จอดรถ"></div>
+        <div class="field"><label>ลำดับการแสดงในบิล</label><input type="number" name="sort_order" value="{{ ct.sort_order if ct else 100 }}"></div>
+      </div>
+      <div class="field"><label>คำอธิบาย</label><input type="text" name="description" value="{{ ct.description if ct else '' }}"></div>
+
+      <div class="field"><label>วิธีคิดเงิน</label>
+        <select name="method" id="method">
+          {% for k, v in METHOD_LABELS.items() %}<option value="{{ k }}" {{ 'selected' if ct and ct.method == k }}>{{ v }}</option>{% endfor %}
+        </select></div>
+
+      <div class="form-row">
+        <div class="field" data-show="meter_rate fixed per_area"><label id="rate-label">อัตรา (บาท)</label><input type="number" step="0.0001" name="rate" value="{{ ct.rate if ct else 0 }}"></div>
+        <div class="field"><label>หน่วยนับ</label><input type="text" name="unit_label" value="{{ ct.unit_label if ct else 'หน่วย' }}" placeholder="เช่น ลบ.ม., kWh, เดือน"></div>
+      </div>
+
+      <div class="field" data-show="meter_tiered">
+        <label>อัตราขั้นบันได (คิดแบบสะสมทีละขั้น)</label>
+        <div id="tiers">
+          {% set r0 = ct.rate if ct else 0 %}{% for t in (tiers or [{'upto': 10, 'rate': r0}, {'upto': none, 'rate': r0}]) %}
+          <div class="tier-row"><span class="muted small">ถึงหน่วยที่</span><input type="number" step="0.01" name="tier_upto" value="{{ t.upto if t.upto is not none else '' }}" placeholder="ว่าง = ขึ้นไป"><span class="muted small">บาท/หน่วย</span><input type="number" step="0.0001" name="tier_rate" value="{{ t.rate }}"><button type="button" class="btn btn-sm btn-danger" onclick="this.parentNode.remove();preview()">ลบ</button></div>
+          {% endfor %}
+        </div>
+        <button type="button" class="btn btn-sm" id="add-tier">+ เพิ่มขั้น</button>
+        <div class="help">ตัวอย่าง: ถึง 10 หน่วย = 10 บาท, ถึง 30 หน่วย = 15 บาท, ว่าง (ขึ้นไป) = 20 บาท → ใช้ 35 หน่วย = 10×10 + 20×15 + 5×20 = 500 บาท</div>
+      </div>
+
+      <div class="form-row">
+        <div class="field" data-show="meter_rate meter_tiered per_area"><label>ค่าบริการบวกเพิ่ม (บาท)</label><input type="number" step="0.01" name="fixed_fee" value="{{ ct.fixed_fee if ct else 0 }}"><div class="help">เช่น ค่ารักษามิเตอร์</div></div>
+        <div class="field" data-show="meter_rate meter_tiered per_area"><label>ค่าขั้นต่ำ (บาท)</label><input type="number" step="0.01" name="min_charge" value="{{ ct.min_charge if ct else 0 }}"><div class="help">ถ้าคำนวณได้น้อยกว่านี้ จะคิดเท่ากับค่าขั้นต่ำ</div></div>
+        <div class="field"><label>VAT (%)</label><input type="number" step="0.01" name="vat_percent" value="{{ ct.vat_percent if ct else 0 }}"></div>
+      </div>
+
+      <div class="preview-box" id="preview">ทดลองคำนวณ...</div>
+      <div class="form-row" style="margin-top:.5rem">
+        <div class="field" data-show="meter_rate meter_tiered"><label>ทดลอง: จำนวนหน่วยที่ใช้</label><input type="number" id="try-usage" value="15"></div>
+        <div class="field" data-show="per_area"><label>ทดลอง: พื้นที่ห้อง</label><input type="number" id="try-area" value="30"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>การเรียกเก็บ</h2>
+      <div class="form-row">
+        <div class="field"><label>ความถี่</label>
+          <select name="frequency" id="frequency">
+            {% for k, v in FREQUENCY_LABELS.items() %}<option value="{{ k }}" {{ 'selected' if ct and ct.frequency == k }}>{{ v }}</option>{% endfor %}
+          </select></div>
+        <div class="field" id="bill-month"><label>เดือนที่เรียกเก็บ (รายปี)</label>
+          <select name="bill_month">{% for m in range(1, 13) %}<option value="{{ m }}" {{ 'selected' if ct and ct.bill_month == m }}>{{ THAI_MONTHS[m] }}</option>{% endfor %}</select></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>เริ่มเรียกเก็บงวด</label><input type="month" name="start_period" value="{{ ct.start_period or '' if ct else '' }}"><div class="help">ไม่ระบุ = ตั้งแต่ตอนนี้ (แบบครั้งเดียวต้องระบุ)</div></div>
+        <div class="field"><label>สิ้นสุดงวด</label><input type="month" name="end_period" value="{{ ct.end_period or '' if ct else '' }}"><div class="help">ไม่ระบุ = ไม่มีกำหนด</div></div>
+      </div>
+      <div class="field"><label>ใช้กับห้อง</label>
+        <label class="check"><input type="radio" name="apply_to" value="all" {{ 'checked' if not ct or ct.apply_to != 'selected' }}> ทุกห้อง</label>
+        <label class="check"><input type="radio" name="apply_to" value="selected" {{ 'checked' if ct and ct.apply_to == 'selected' }}> เฉพาะห้องที่เลือก</label>
+      </div>
+      <div class="field">
+        <label>ยอดเฉพาะห้อง / เลือกห้อง</label>
+        <div class="help" style="margin-bottom:.35rem">ติ๊กเลือกห้อง (กรณี "เฉพาะห้องที่เลือก") และ/หรือใส่ยอดเฉพาะห้องเพื่อแทนที่ยอดที่คำนวณ เช่น ห้องนี้จ่ายค่าประกันต่างจากห้องอื่น</div>
+        <div class="unit-pick"><table>
+          <thead><tr><th><input type="checkbox" id="pick-all" title="เลือกทั้งหมด"></th><th>ห้อง</th><th>ยอดเฉพาะห้อง (บาท)</th></tr></thead>
+          <tbody>
+          {% for u in units %}
+            <tr><td><input type="checkbox" class="pick" name="unit_{{ u.id }}" value="1" {{ 'checked' if u.id in selections }}></td>
+              <td>{{ u.unit_no }} <span class="muted small">{{ u.owner_name }}</span></td>
+              <td><input type="number" step="0.01" class="cell" name="override_{{ u.id }}" value="{{ selections[u.id] if selections.get(u.id) is not none else '' }}"></td></tr>
+          {% else %}<tr><td colspan="3" class="muted">ยังไม่มีห้อง</td></tr>{% endfor %}
+          </tbody>
+        </table></div>
+      </div>
+      <div class="field"><label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if not ct or ct.active }}> เปิดใช้งาน</label></div>
+    </div>
+  </div>
+  <button class="btn btn-primary">บันทึก</button>
+  <a class="btn" href="{{ url_for('admin.charges') }}">ยกเลิก</a>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+var form = document.getElementById('charge-form');
+var method = document.getElementById('method');
+var freq = document.getElementById('frequency');
+var rateLabels = {meter_rate: 'อัตรา (บาท ต่อหน่วย)', fixed: 'จำนวนเงินต่อห้อง (บาท)', per_area: 'อัตรา (บาท ต่อ ตร.ม.)'};
+function sync() {
+  document.querySelectorAll('[data-show]').forEach(function (el) {
+    el.style.display = el.getAttribute('data-show').split(' ').indexOf(method.value) >= 0 ? '' : 'none';
+  });
+  document.getElementById('rate-label').textContent = rateLabels[method.value] || 'อัตรา';
+  document.getElementById('bill-month').style.display = freq.value === 'yearly' ? '' : 'none';
+}
+var timer;
+function preview() {
+  clearTimeout(timer);
+  timer = setTimeout(function () {
+    var tiers = [];
+    var uptos = form.querySelectorAll('[name=tier_upto]'), rates = form.querySelectorAll('[name=tier_rate]');
+    for (var i = 0; i < rates.length; i++) if (rates[i].value !== '') tiers.push({upto: uptos[i].value === '' ? null : uptos[i].value, rate: rates[i].value});
+    var p = new URLSearchParams({
+      method: method.value, rate: form.rate.value, fixed_fee: form.fixed_fee.value, min_charge: form.min_charge.value,
+      vat_percent: form.vat_percent.value, unit_label: form.unit_label.value, tiers: JSON.stringify(tiers),
+      usage: document.getElementById('try-usage').value, area: document.getElementById('try-area').value
+    });
+    fetch('{{ url_for("admin.charge_preview") }}?' + p).then(function (r) { return r.json(); }).then(function (d) {
+      var txt = 'ผลคำนวณตัวอย่าง: ' + Number(d.amount).toLocaleString('th-TH', {minimumFractionDigits: 2}) + ' บาท';
+      if (d.vat) txt += ' + VAT ' + Number(d.vat).toLocaleString('th-TH', {minimumFractionDigits: 2});
+      if (d.detail) txt += ' (' + d.detail + ')';
+      document.getElementById('preview').textContent = txt;
+    });
+  }, 250);
+}
+document.getElementById('add-tier').addEventListener('click', function () {
+  var row = document.querySelector('#tiers .tier-row');
+  var clone = row ? row.cloneNode(true) : null;
+  if (!clone) return;
+  clone.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+  document.getElementById('tiers').appendChild(clone);
+});
+document.getElementById('pick-all').addEventListener('change', function () {
+  var on = this.checked;
+  document.querySelectorAll('.pick').forEach(function (c) { c.checked = on; });
+});
+method.addEventListener('change', function () { sync(); preview(); });
+freq.addEventListener('change', sync);
+form.addEventListener('input', preview);
+document.getElementById('try-usage').addEventListener('input', preview);
+document.getElementById('try-area').addEventListener('input', preview);
+sync(); preview();
+</script>
+{% endblock %}

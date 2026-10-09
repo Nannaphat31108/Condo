@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, post_button %}
+{% block content %}
+<h1>รายการเรียกเก็บเพิ่มเติม</h1>
+<p class="muted">สำหรับค่าใช้จ่ายเฉพาะห้อง/เฉพาะครั้ง เช่น ค่าซ่อม ค่าบัตรผ่าน ค่าปรับผิดระเบียบ หรือส่วนลด (ใส่ยอดติดลบ)
+  — รายการจะถูกรวมเข้าใบแจ้งหนี้ใบถัดไปที่ออกให้ห้องนั้นโดยอัตโนมัติ
+  ถ้าเป็นค่าบริการประจำทุกเดือน ให้เพิ่มที่ <a href="{{ url_for('admin.charges') }}">ตั้งค่าค่าบริการ</a> แทน</p>
+<div class="card">
+  <form method="post">
+    {{ csrf() }}
+    <div class="form-row">
+      <div class="field"><label>งวดที่เรียกเก็บ</label><input type="month" name="period" value="{{ period }}" required></div>
+      <div class="field"><label>รายละเอียด *</label><input type="text" name="description" required placeholder="เช่น ค่าซ่อมก๊อกน้ำ"></div>
+      <div class="field"><label>จำนวนเงิน (บาท) *</label><input type="number" step="0.01" name="amount" required></div>
+    </div>
+    <div class="field"><label>เลือกห้อง <label class="check inline" style="display:inline-flex;margin-left:1rem"><input type="checkbox" id="pick-all"> เลือกทั้งหมด</label></label>
+      <div class="checklist">
+        {% for u in units %}<label class="check"><input type="checkbox" class="pick" name="unit_ids" value="{{ u.id }}"> {{ u.unit_no }}</label>{% endfor %}
+      </div></div>
+    <button class="btn btn-primary">เพิ่มรายการ</button>
+  </form>
+</div>
+<div class="card"><div class="table-wrap"><table>
+  <thead><tr><th>งวด</th><th>ห้อง</th><th>รายละเอียด</th><th class="num">จำนวนเงิน</th><th>ออกบิลแล้ว</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr><td>{{ r.period|period }}</td><td>{{ r.unit_no }}</td><td>{{ r.description }}</td><td class="num">{{ r.amount|baht }}</td>
+      <td>{% if r.invoice_no %}<a href="{{ url_for('admin.invoice_detail', invoice_id=r.invoice_id) }}">{{ r.invoice_no }}</a>{% else %}<span class="badge partial">รอออกบิล</span>{% endif %}</td>
+      <td>{% if not r.invoice_id %}{{ post_button(url_for('admin.adhoc_delete', adhoc_id=r.id), 'ลบ', 'ยืนยันลบรายการนี้?', 'btn btn-sm btn-danger') }}{% endif %}</td></tr>
+  {% else %}<tr><td colspan="6" class="muted">ยังไม่มีรายการ</td></tr>{% endfor %}
+  </tbody>
+</table></div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('pick-all').addEventListener('change', function () {
+  var on = this.checked;
+  document.querySelectorAll('.pick').forEach(function (c) { c.checked = on; });
+});
+</script>
+{% endblock %}

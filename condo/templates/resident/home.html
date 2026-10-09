@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "_macros.html" import status_badge %}
+{% block content %}
+<h1>ห้อง {{ unit.unit_no if unit else '-' }}</h1>
+<div class="grid grid-3" style="margin-bottom:1.25rem">
+  <div class="stat"><div class="label">ยอดค้างชำระ</div><div class="value" style="color:{{ 'var(--danger)' if outstanding > 0 else 'var(--success)' }}">{{ outstanding|baht }}</div><div class="sub">บาท</div></div>
+  <div class="stat"><div class="label">ชื่อ</div><div class="value" style="font-size:1.1rem">{{ unit.owner_name if unit else '-' }}</div></div>
+  <div class="stat"><div class="label">ช่องทางชำระเงิน</div><div class="small" style="margin-top:.3rem">{{ settings.bank_info }}</div></div>
+</div>
+<div class="card">
+  <h2>ใบแจ้งหนี้ของฉัน</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>งวด</th><th>เลขที่</th><th>ครบกำหนด</th><th class="num">ยอดรวม</th><th class="num">ชำระแล้ว</th><th>สถานะ</th></tr></thead>
+    <tbody>{% for i in invoices %}
+      <tr><td>{{ i.period|period }}</td><td><a href="{{ url_for('resident.invoice', invoice_id=i.id) }}">{{ i.invoice_no }}</a></td><td>{{ i.due_date }}</td><td class="num">{{ i.total|baht }}</td><td class="num">{{ i.paid_amount|baht }}</td><td>{{ status_badge(i.status) }}</td></tr>
+    {% else %}<tr><td colspan="6" class="muted">ยังไม่มีใบแจ้งหนี้</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+<div class="card">
+  <h2>ประวัติการใช้น้ำ/ไฟ</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>งวด</th><th>ประเภท</th><th class="num">ครั้งก่อน</th><th class="num">ครั้งนี้</th><th class="num">ใช้ไป</th></tr></thead>
+    <tbody>{% for r in readings %}<tr><td>{{ r.period|period }}</td><td>{{ r.name }}</td><td class="num">{{ r.prev_reading|num }}</td><td class="num">{{ r.curr_reading|num }}</td><td class="num">{{ (r.curr_reading - r.prev_reading)|num }} {{ r.unit_label }}</td></tr>
+    {% else %}<tr><td colspan="5" class="muted">ยังไม่มีข้อมูล</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endblock %}

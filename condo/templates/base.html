@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ settings.condo_name }}{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+{% if g.user %}
+<div class="topbar no-print">
+  <strong>{{ settings.condo_name }}</strong>
+  <button type="button" onclick="document.querySelector('.sidebar').classList.toggle('open')">เมนู</button>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">{{ settings.condo_name }}<small>ระบบบริหารนิติบุคคล</small></div>
+    <nav>
+      {% set ep = request.endpoint or '' %}
+      {% if g.user.role == 'admin' %}
+        <a href="{{ url_for('admin.dashboard') }}" class="{{ 'active' if ep == 'admin.dashboard' }}">ภาพรวม</a>
+        <div class="section">งานประจำเดือน</div>
+        <a href="{{ url_for('admin.meters') }}" class="{{ 'active' if ep == 'admin.meters' }}">จดมิเตอร์น้ำ/ไฟ</a>
+        <a href="{{ url_for('admin.adhoc') }}" class="{{ 'active' if ep == 'admin.adhoc' }}">รายการเรียกเก็บเพิ่มเติม</a>
+        <a href="{{ url_for('admin.billing_page') }}" class="{{ 'active' if ep == 'admin.billing_page' }}">ออกใบแจ้งหนี้</a>
+        <a href="{{ url_for('admin.invoices') }}" class="{{ 'active' if ep in ('admin.invoices', 'admin.invoice_detail') }}">ใบแจ้งหนี้ / รับชำระ</a>
+        <a href="{{ url_for('admin.reports') }}" class="{{ 'active' if ep == 'admin.reports' }}">รายงาน / ข้อมูลย้อนหลัง</a>
+        <div class="section">ข้อมูลหลัก</div>
+        <a href="{{ url_for('admin.units') }}" class="{{ 'active' if ep.startswith('admin.unit') }}">ห้องชุด / ลูกบ้าน</a>
+        <a href="{{ url_for('admin.charges') }}" class="{{ 'active' if ep.startswith('admin.charge') }}">ตั้งค่าค่าบริการ</a>
+        <a href="{{ url_for('admin.users') }}" class="{{ 'active' if ep.startswith('admin.user') }}">ผู้ใช้งานระบบ</a>
+        <a href="{{ url_for('admin.settings_page') }}" class="{{ 'active' if ep == 'admin.settings_page' }}">ตั้งค่าทั่วไป</a>
+        <a href="{{ url_for('admin.activity') }}" class="{{ 'active' if ep == 'admin.activity' }}">ประวัติการใช้งาน</a>
+      {% else %}
+        <a href="{{ url_for('resident.home') }}" class="{{ 'active' if ep == 'resident.home' }}">บิลของฉัน</a>
+      {% endif %}
+    </nav>
+    <div class="userbox">
+      <div>{{ g.user.full_name or g.user.username }}</div>
+      <div class="muted small">{{ 'ผู้ดูแลระบบ' if g.user.role == 'admin' else 'ลูกบ้าน' }}</div>
+      <div style="margin-top:.5rem"><a href="{{ url_for('auth.change_password') }}">เปลี่ยนรหัสผ่าน</a></div>
+      <form method="post" action="{{ url_for('auth.logout') }}" style="margin-top:.25rem">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button type="submit">ออกจากระบบ</button>
+      </form>
+    </div>
+  </aside>
+  <main class="main">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% else %}
+  {% block public %}{% endblock %}
+{% endif %}
+<script>
+document.addEventListener('submit', function (e) {
+  var msg = e.target.getAttribute('data-confirm');
+  if (msg && !confirm(msg)) e.preventDefault();
+});
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

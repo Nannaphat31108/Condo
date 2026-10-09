@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}ใบเสร็จ {{ p.receipt_no }}{% endblock %}
+{% block content %}
+<div class="page-head no-print">
+  <h1>ใบเสร็จรับเงิน {{ p.receipt_no }}</h1>
+  <div class="actions">
+    <a class="btn" href="{{ url_for('admin.invoice_detail' if g.user.role == 'admin' else 'resident.invoice', invoice_id=inv.id) }}">กลับไปที่ใบแจ้งหนี้</a>
+    <button class="btn btn-primary" onclick="window.print()">พิมพ์</button>
+  </div>
+</div>
+<div class="doc">
+  <div class="doc-head">
+    <div>
+      <strong style="font-size:1.1rem">{{ settings.condo_name }}</strong>
+      <div class="small">{{ settings.address }}</div>
+      {% if settings.phone %}<div class="small">โทร {{ settings.phone }}</div>{% endif %}
+      {% if settings.tax_id %}<div class="small">เลขประจำตัวผู้เสียภาษี {{ settings.tax_id }}</div>{% endif %}
+    </div>
+    <div class="title"><h2>ใบเสร็จรับเงิน</h2><div class="small">RECEIPT</div></div>
+  </div>
+  <div class="doc-meta">
+    <div><b>เลขที่:</b> {{ p.receipt_no }}</div>
+    <div><b>วันที่ชำระ:</b> {{ p.paid_at }}</div>
+    <div><b>ห้อง/บ้านเลขที่:</b> {{ inv.unit_no }}</div>
+    <div><b>อ้างอิงใบแจ้งหนี้:</b> {{ inv.invoice_no }} ({{ inv.period|period }})</div>
+    <div><b>ชื่อ:</b> {{ inv.owner_name or '-' }}</div>
+    <div><b>ช่องทาง:</b> {{ p.method }}{% if p.reference %} ({{ p.reference }}){% endif %}</div>
+  </div>
+  <table>
+    <thead><tr><th>#</th><th>รายการตามใบแจ้งหนี้</th><th class="num">จำนวนเงิน</th></tr></thead>
+    <tbody>
+      {% for it in items %}<tr><td>{{ loop.index }}</td><td>{{ it.description }}</td><td class="num">{{ (it.amount + it.vat_amount)|baht }}</td></tr>{% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><td colspan="2" class="num">ยอดตามใบแจ้งหนี้</td><td class="num">{{ inv.total|baht }}</td></tr>
+      <tr class="total-row"><td colspan="2" class="num">ได้รับชำระครั้งนี้</td><td class="num">{{ p.amount|baht }}</td></tr>
+      <tr><td colspan="2" class="num">คงค้างหลังชำระทั้งหมด</td><td class="num">{{ (inv.total - inv.paid_amount)|baht }}</td></tr>
+    </tfoot>
+  </table>
+  {% if p.note %}<div class="foot">หมายเหตุ: {{ p.note }}</div>{% endif %}
+  <div class="signs"><div>ผู้ชำระเงิน</div><div>ผู้รับเงิน</div></div>
+</div>
+{% endblock %}

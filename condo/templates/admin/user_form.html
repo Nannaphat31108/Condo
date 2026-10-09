@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block content %}
+<h1>{{ 'แก้ไขผู้ใช้ ' ~ user.username if user_id else 'เพิ่มผู้ใช้' }}</h1>
+<div class="card" style="max-width:640px">
+  <form method="post">
+    {{ csrf() }}
+    <div class="form-row">
+      <div class="field"><label>ชื่อผู้ใช้ (สำหรับ login) *</label><input type="text" name="username" value="{{ user.username if user and user.username else '' }}" required autocomplete="off"></div>
+      <div class="field"><label>ชื่อ-นามสกุล</label><input type="text" name="full_name" value="{{ user.full_name if user and user.full_name else '' }}"></div>
+    </div>
+    <div class="field"><label>รหัสผ่าน {{ '(เว้นว่างถ้าไม่ต้องการเปลี่ยน)' if user_id else '*' }}</label>
+      <input type="password" name="password" {{ '' if user_id else 'required' }} minlength="6" autocomplete="new-password"></div>
+    <div class="form-row">
+      <div class="field"><label>สิทธิ์การใช้งาน</label>
+        <select name="role" id="role">
+          <option value="resident" {{ 'selected' if not user or user.role != 'admin' }}>ลูกบ้าน (ดูบิลของห้องตัวเอง)</option>
+          <option value="admin" {{ 'selected' if user and user.role == 'admin' }}>ผู้ดูแลระบบ (นิติบุคคล)</option>
+        </select></div>
+      <div class="field" id="unit-field"><label>ห้อง (สำหรับลูกบ้าน)</label>
+        <select name="unit_id"><option value="">-- เลือกห้อง --</option>
+          {% for u in units %}<option value="{{ u.id }}" {{ 'selected' if user and user.unit_id == u.id }}>{{ u.unit_no }} {{ u.owner_name }}</option>{% endfor %}
+        </select></div>
+    </div>
+    <div class="field"><label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if not user or user.active }}> เปิดใช้งาน</label></div>
+    <button class="btn btn-primary">บันทึก</button>
+    <a class="btn" href="{{ url_for('admin.users') }}">ยกเลิก</a>
+  </form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var role = document.getElementById('role'), unit = document.getElementById('unit-field');
+  function sync() { unit.style.display = role.value === 'admin' ? 'none' : ''; }
+  role.addEventListener('change', sync); sync();
+})();
+</script>
+{% endblock %}

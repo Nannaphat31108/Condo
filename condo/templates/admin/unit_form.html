@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block content %}
+<h1>{{ 'แก้ไขห้อง ' ~ unit.unit_no if unit_id else 'เพิ่มห้อง' }}</h1>
+<div class="card" style="max-width:760px">
+  <form method="post">
+    {{ csrf() }}
+    <div class="form-row">
+      <div class="field"><label>เลขห้อง / บ้านเลขที่ *</label><input type="text" name="unit_no" value="{{ unit.unit_no if unit else '' }}" required></div>
+      <div class="field"><label>อาคาร / ซอย</label><input type="text" name="building" value="{{ unit.building if unit else '' }}"></div>
+      <div class="field"><label>ชั้น</label><input type="text" name="floor" value="{{ unit.floor if unit else '' }}"></div>
+      <div class="field"><label>พื้นที่ (ตร.ม. / ตร.ว.)</label><input type="number" step="0.01" min="0" name="area_sqm" value="{{ unit.area_sqm if unit else '' }}"><div class="help">ใช้คำนวณค่าบริการแบบ "ตามพื้นที่" เช่น ค่าส่วนกลาง</div></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label>ชื่อเจ้าของ / ผู้พักอาศัย</label><input type="text" name="owner_name" value="{{ unit.owner_name if unit else '' }}"></div>
+      <div class="field"><label>เบอร์โทร</label><input type="text" name="phone" value="{{ unit.phone if unit else '' }}"></div>
+      <div class="field"><label>อีเมล</label><input type="email" name="email" value="{{ unit.email if unit else '' }}"></div>
+    </div>
+    <div class="field"><label>หมายเหตุ</label><textarea name="note" rows="2">{{ unit.note if unit else '' }}</textarea></div>
+    <div class="field"><label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if not unit or unit.active }}> เปิดใช้งาน (ออกบิลให้ห้องนี้)</label></div>
+    <button class="btn btn-primary">บันทึก</button>
+    <a class="btn" href="{{ url_for('admin.units') }}">ยกเลิก</a>
+  </form>
+</div>
+{% endblock %}

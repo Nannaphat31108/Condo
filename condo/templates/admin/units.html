@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>ห้องชุด / ลูกบ้าน</h1>
+  <div class="actions">
+    <form method="get" class="filters"><input type="text" name="q" value="{{ q }}" placeholder="ค้นหาเลขห้อง ชื่อ เบอร์โทร"></form>
+    <a class="btn" href="{{ url_for('admin.unit_import') }}">นำเข้าหลายห้อง</a>
+    <a class="btn btn-primary" href="{{ url_for('admin.unit_form') }}">+ เพิ่มห้อง</a>
+  </div>
+</div>
+<div class="card"><div class="table-wrap"><table>
+  <thead><tr><th>เลขห้อง</th><th>อาคาร/ชั้น</th><th class="num">พื้นที่ (ตร.ม.)</th><th>เจ้าของ/ผู้เช่า</th><th>โทร</th><th>บัญชีผู้ใช้</th><th class="num">ค้างชำระ</th><th>สถานะ</th><th></th></tr></thead>
+  <tbody>
+  {% for u in units %}
+    <tr>
+      <td><a href="{{ url_for('admin.unit_detail', unit_id=u.id) }}"><b>{{ u.unit_no }}</b></a></td>
+      <td>{{ u.building }}{% if u.floor %} / ชั้น {{ u.floor }}{% endif %}</td>
+      <td class="num">{{ u.area_sqm|num }}</td>
+      <td>{{ u.owner_name }}</td><td>{{ u.phone }}</td>
+      <td class="small">{{ u.usernames or '-' }}</td>
+      <td class="num">{% if u.outstanding %}<span style="color:var(--danger)">{{ u.outstanding|baht }}</span>{% else %}-{% endif %}</td>
+      <td>{% if u.active %}<span class="badge on">ใช้งาน</span>{% else %}<span class="badge off">ปิด</span>{% endif %}</td>
+      <td class="nowrap"><a class="btn btn-sm" href="{{ url_for('admin.unit_form', unit_id=u.id) }}">แก้ไข</a></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="9" class="muted">ยังไม่มีข้อมูลห้อง — <a href="{{ url_for('admin.unit_form') }}">เพิ่มห้อง</a> หรือ <a href="{{ url_for('admin.unit_import') }}">นำเข้าหลายห้อง</a></td></tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% endblock %}

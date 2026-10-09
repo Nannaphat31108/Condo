@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, status_badge, period_picker %}
+{% block content %}
+<div class="page-head">
+  <h1>ออกใบแจ้งหนี้ งวด {{ period|period }}</h1>
+  {{ period_picker(period) }}
+</div>
+<div class="grid grid-2">
+  <div class="card">
+    <h2>ตรวจสอบความพร้อม</h2>
+    <table>
+      <tr><td>ห้องที่เปิดใช้งาน</td><td class="num">{{ unit_count }} ห้อง</td></tr>
+      {% for m in meter_status %}
+      <tr><td>จดมิเตอร์ {{ m.ct.name }}</td>
+        <td class="num">{% if m.done >= unit_count %}<span class="badge paid">ครบ {{ m.done }}/{{ unit_count }}</span>{% else %}<a href="{{ url_for('admin.meters', period=period, charge_type_id=m.ct.id) }}"><span class="badge unpaid">{{ m.done }}/{{ unit_count }} จดต่อ →</span></a>{% endif %}</td></tr>
+      {% endfor %}
+      <tr><td>รายการเพิ่มเติมที่รอออกบิล</td><td class="num"><a href="{{ url_for('admin.adhoc', period=period) }}">{{ pending_adhoc }} รายการ</a></td></tr>
+      <tr><td>วันที่ออกบิล / ครบกำหนด</td><td class="num">{{ issue_date }} / {{ due_date }}</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h2>ออกใบแจ้งหนี้อัตโนมัติ</h2>
+    <p class="small">ระบบจะคำนวณทุกรายการตามที่ตั้งค่าไว้ (ค่าน้ำ ค่าไฟ ค่าขยะ ค่าประกัน ค่าบริการอื่น ๆ รายการเพิ่มเติม และค่าปรับบิลค้างเกินกำหนด) ให้ทุกห้องที่ยังไม่มีบิลงวดนี้
+      — ห้องที่ยังไม่ได้จดมิเตอร์จะยังไม่ออกบิล กดซ้ำได้หลังจดเพิ่ม</p>
+    <form method="post" data-confirm="ยืนยันออกใบแจ้งหนี้งวด {{ period|period }} ?">
+      {{ csrf() }}<input type="hidden" name="period" value="{{ period }}">
+      <button class="btn btn-primary">ออกใบแจ้งหนี้งวด {{ period|period }}</button>
+    </form>
+    {% if invoices %}<p style="margin-top:.75rem"><a class="btn" href="{{ url_for('admin.invoices_print', period=period) }}">พิมพ์ใบแจ้งหนี้ทั้งงวด</a></p>{% endif %}
+  </div>
+</div>
+<div class="card">
+  <h2>ใบแจ้งหนี้งวดนี้ ({{ invoices|length }})</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>เลขที่</th><th>ห้อง</th><th>ชื่อ</th><th class="num">ยอดรวม</th><th class="num">ชำระแล้ว</th><th>สถานะ</th></tr></thead>
+    <tbody>
+    {% for i in invoices %}
+      <tr><td><a href="{{ url_for('admin.invoice_detail', invoice_id=i.id) }}">{{ i.invoice_no }}</a></td><td>{{ i.unit_no }}</td><td>{{ i.owner_name }}</td>
+        <td class="num">{{ i.total|baht }}</td><td class="num">{{ i.paid_amount|baht }}</td><td>{{ status_badge(i.status) }}</td></tr>
+    {% else %}<tr><td colspan="6" class="muted">ยังไม่มีใบแจ้งหนี้</td></tr>{% endfor %}
+    </tbody>
+    {% set live = invoices|rejectattr('status', 'equalto', 'void')|list %}
+    {% if live %}<tfoot><tr><td colspan="3">รวม</td><td class="num">{{ live|sum(attribute='total')|baht }}</td><td class="num">{{ live|sum(attribute='paid_amount')|baht }}</td><td></td></tr></tfoot>{% endif %}
+  </table></div>
+</div>
+{% endblock %}

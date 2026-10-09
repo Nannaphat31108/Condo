@@ -1,0 +1,55 @@
+{# ตัวเอกสารใบแจ้งหนี้ ใช้ร่วมกันระหว่างหน้าดูบิลและพิมพ์ทั้งงวด #}
+<div class="doc">
+  <div class="doc-head">
+    <div>
+      <strong style="font-size:1.1rem">{{ settings.condo_name }}</strong>
+      <div class="small">{{ settings.address }}</div>
+      {% if settings.phone %}<div class="small">โทร {{ settings.phone }}</div>{% endif %}
+      {% if settings.tax_id %}<div class="small">เลขประจำตัวผู้เสียภาษี {{ settings.tax_id }}</div>{% endif %}
+    </div>
+    <div class="title">
+      <h2>ใบแจ้งหนี้</h2>
+      <div class="small">INVOICE</div>
+      {% if inv.status == 'paid' %}<div style="margin-top:.5rem"><span class="paid-stamp">ชำระแล้ว</span></div>{% endif %}
+      {% if inv.status == 'void' %}<div style="margin-top:.5rem"><span class="badge void">ยกเลิก</span></div>{% endif %}
+    </div>
+  </div>
+  <div class="doc-meta">
+    <div><b>เลขที่:</b> {{ inv.invoice_no }}</div>
+    <div><b>ประจำงวด:</b> {{ inv.period|period }}</div>
+    <div><b>ห้อง/บ้านเลขที่:</b> {{ inv.unit_no }}{% if unit and unit.building %} อาคาร {{ unit.building }}{% endif %}</div>
+    <div><b>วันที่ออก:</b> {{ inv.issue_date }}</div>
+    <div><b>ชื่อ:</b> {{ inv.owner_name or '-' }}</div>
+    <div><b>ครบกำหนดชำระ:</b> {{ inv.due_date }}</div>
+  </div>
+  <table>
+    <thead><tr><th style="width:40px">#</th><th>รายการ</th><th class="num">จำนวน</th><th class="num">ราคา/หน่วย</th><th class="num">จำนวนเงิน (บาท)</th></tr></thead>
+    <tbody>
+    {% for it in items %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ it.description }}{% if it.detail %}<div class="muted small">{{ it.detail }}</div>{% endif %}</td>
+        <td class="num">{{ it.quantity|num }} {{ it.unit_label }}</td>
+        <td class="num">{{ it.unit_price|baht }}</td>
+        <td class="num">{{ it.amount|baht }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot>
+      {% if inv.vat %}
+      <tr><td colspan="4" class="num">รวมก่อนภาษี</td><td class="num">{{ inv.subtotal|baht }}</td></tr>
+      <tr><td colspan="4" class="num">ภาษีมูลค่าเพิ่ม</td><td class="num">{{ inv.vat|baht }}</td></tr>
+      {% endif %}
+      <tr class="total-row"><td colspan="4" class="num">ยอดรวมทั้งสิ้น</td><td class="num">{{ inv.total|baht }}</td></tr>
+      {% if inv.paid_amount %}
+      <tr><td colspan="4" class="num">ชำระแล้ว</td><td class="num">{{ inv.paid_amount|baht }}</td></tr>
+      <tr><td colspan="4" class="num">คงค้างชำระ</td><td class="num">{{ (inv.total - inv.paid_amount)|baht }}</td></tr>
+      {% endif %}
+    </tfoot>
+  </table>
+  <div class="foot">
+    {% if settings.bank_info %}<div><b>ช่องทางชำระเงิน:</b> {{ settings.bank_info }}</div>{% endif %}
+    {% if inv.note %}<div class="muted">{{ inv.note }}</div>{% endif %}
+  </div>
+  <div class="signs"><div>ผู้รับเงิน</div><div>นิติบุคคล / ผู้จัดการ</div></div>
+</div>

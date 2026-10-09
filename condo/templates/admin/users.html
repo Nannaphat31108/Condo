@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "_macros.html" import post_button %}
+{% block content %}
+<div class="page-head">
+  <h1>ผู้ใช้งานระบบ</h1>
+  <a class="btn btn-primary" href="{{ url_for('admin.user_form') }}">+ เพิ่มผู้ใช้</a>
+</div>
+<div class="card"><div class="table-wrap"><table>
+  <thead><tr><th>ชื่อผู้ใช้</th><th>ชื่อ-นามสกุล</th><th>สิทธิ์</th><th>ห้อง</th><th>เข้าระบบล่าสุด</th><th>สถานะ</th><th></th></tr></thead>
+  <tbody>
+  {% for u in users %}
+    <tr>
+      <td><b>{{ u.username }}</b></td><td>{{ u.full_name }}</td>
+      <td><span class="badge {{ u.role }}">{{ 'ผู้ดูแลระบบ' if u.role == 'admin' else 'ลูกบ้าน' }}</span></td>
+      <td>{{ u.unit_no or '-' }}</td><td class="small">{{ u.last_login or '-' }}</td>
+      <td>{% if u.active %}<span class="badge on">ใช้งาน</span>{% else %}<span class="badge off">ปิด</span>{% endif %}</td>
+      <td class="nowrap">
+        <a class="btn btn-sm" href="{{ url_for('admin.user_form', user_id=u.id) }}">แก้ไข</a>
+        {% if u.id != g.user.id %}{{ post_button(url_for('admin.user_delete', user_id=u.id), 'ลบ', 'ยืนยันลบผู้ใช้ ' ~ u.username ~ ' ?', 'btn btn-sm btn-danger') }}{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div></div>
+{% endblock %}

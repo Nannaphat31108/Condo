@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block content %}
+<h1>นำเข้าข้อมูลห้องหลายห้อง</h1>
+<div class="card" style="max-width:760px">
+  <p>รูปแบบ CSV หนึ่งบรรทัดต่อหนึ่งห้อง: <code>เลขห้อง,อาคาร,ชั้น,พื้นที่,ชื่อเจ้าของ,เบอร์โทร</code> (เลขห้องที่มีอยู่แล้วจะถูกข้าม)</p>
+  <form method="post" enctype="multipart/form-data">
+    {{ csrf() }}
+    <div class="field"><label>วางข้อความ</label><textarea name="csv_text" rows="10" placeholder="101,A,1,32.5,สมชาย ใจดี,0812345678&#10;102,A,1,28,สมหญิง รักดี,0899999999"></textarea></div>
+    <div class="field"><label>หรือเลือกไฟล์ .csv</label><input type="file" name="csv_file" accept=".csv,text/csv"></div>
+    <button class="btn btn-primary">นำเข้า</button>
+    <a class="btn" href="{{ url_for('admin.units') }}">ยกเลิก</a>
+  </form>
+</div>
+{% endblock %}

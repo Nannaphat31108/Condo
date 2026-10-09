@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block content %}
+<div class="page-head">
+  <h1>จดมิเตอร์ — {{ ct.name }} งวด {{ period|period }}</h1>
+  <form method="get" class="filters">
+    <div class="field"><label>ประเภทมิเตอร์</label>
+      <select name="charge_type_id" onchange="this.form.submit()">
+        {% for m in meter_types %}<option value="{{ m.id }}" {{ 'selected' if m.id == ct.id }}>{{ m.name }}{{ '' if m.active else ' (ปิด)' }}</option>{% endfor %}
+      </select></div>
+    <div class="field"><label>งวดเดือน</label><input type="month" name="period" value="{{ period }}" onchange="this.form.submit()"></div>
+  </form>
+</div>
+<p class="muted small">เลขครั้งก่อนจะดึงจากงวดล่าสุดให้อัตโนมัติ (แก้ไขได้) — กรอกเฉพาะเลขครั้งนี้แล้วกดบันทึก ระบบจะคำนวณยอดเงินให้ทันที
+  ถ้ามิเตอร์เปลี่ยนใหม่/วนรอบ ให้ติ๊ก "เริ่มใหม่" ระบบจะนับจาก 0</p>
+<form method="post">
+  {{ csrf() }}
+  <input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="charge_type_id" value="{{ ct.id }}">
+  <div class="card"><div class="table-wrap"><table>
+    <thead><tr><th>ห้อง</th><th>ชื่อ</th><th class="num">เลขครั้งก่อน</th><th class="num">เลขครั้งนี้</th><th>เริ่มใหม่</th><th class="num">ใช้ไป</th><th class="num">ยอดเงิน (บาท)</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td><b>{{ r.unit.unit_no }}</b>{% if r.invoiced %} <span class="badge paid" title="ออกบิลงวดนี้แล้ว">ออกบิลแล้ว</span>{% endif %}</td>
+        <td class="small">{{ r.unit.owner_name }}</td>
+        <td class="num"><input class="cell" type="number" step="0.01" name="prev_{{ r.unit.id }}" value="{{ r.prev|num|replace(',', '') }}" {{ 'readonly' if r.invoiced }}></td>
+        <td class="num"><input class="cell curr" type="number" step="0.01" name="curr_{{ r.unit.id }}" value="{{ (r.curr|num|replace(',', '')) if r.curr is not none else '' }}" {{ 'readonly' if r.invoiced }}></td>
+        <td><input type="checkbox" name="reset_{{ r.unit.id }}" value="1" title="มิเตอร์เปลี่ยนใหม่/วนรอบ" {{ 'disabled' if r.invoiced }}></td>
+        <td class="num">{{ r.preview.quantity|num if r.preview else '-' }}</td>
+        <td class="num">{{ r.preview.amount|baht if r.preview else '-' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="muted">ยังไม่มีห้อง</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div></div>
+  <button class="btn btn-primary">บันทึกเลขมิเตอร์</button>
+  <a class="btn" href="{{ url_for('admin.billing_page', period=period) }}">ไปหน้าออกใบแจ้งหนี้ →</a>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+// กด Enter เพื่อเลื่อนไปช่องถัดไป ช่วยให้จดมิเตอร์ได้เร็ว
+var cells = Array.prototype.slice.call(document.querySelectorAll('input.curr'));
+cells.forEach(function (c, i) {
+  c.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); if (cells[i + 1]) cells[i + 1].focus(); }
+  });
+});
+</script>
+{% endblock %}

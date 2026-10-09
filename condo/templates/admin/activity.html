@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>ประวัติการใช้งาน</h1>
+<div class="card"><div class="table-wrap"><table>
+  <thead><tr><th>เวลา</th><th>ผู้ใช้</th><th>การกระทำ</th></tr></thead>
+  <tbody>{% for r in rows %}<tr><td class="nowrap small">{{ r.created_at }}</td><td>{{ r.username or '-' }}</td><td>{{ r.action }}</td></tr>
+  {% else %}<tr><td colspan="3" class="muted">ไม่มีข้อมูล</td></tr>{% endfor %}</tbody>
+</table></div></div>
+{% endblock %}
