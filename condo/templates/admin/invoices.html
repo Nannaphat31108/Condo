@@ -17,13 +17,14 @@
   </form>
 </div>
 <div class="card"><div class="table-wrap"><table>
-  <thead><tr><th>เลขที่</th><th>งวด</th><th>ห้อง</th><th>ชื่อ</th><th>ครบกำหนด</th><th class="num">ยอดรวม</th><th class="num">ชำระแล้ว</th><th class="num">คงค้าง</th><th>สถานะ</th></tr></thead>
+  <thead><tr><th>เลขที่</th><th>งวด</th><th>ห้อง</th><th>ชื่อ</th><th>ครบกำหนด</th><th class="num">ยอดรวม</th><th class="num">ชำระแล้ว</th><th class="num">คงค้าง</th><th>สถานะ</th><th class="no-print"></th></tr></thead>
   <tbody>
   {% for i in invoices %}
     <tr><td><a href="{{ url_for('admin.invoice_detail', invoice_id=i.id) }}">{{ i.invoice_no }}</a></td><td>{{ i.period|period }}</td><td>{{ i.unit_no }}</td><td>{{ i.owner_name }}</td><td>{{ i.due_date }}</td>
-      <td class="num">{{ i.total|baht }}</td><td class="num">{{ i.paid_amount|baht }}</td><td class="num">{{ (i.total - i.paid_amount)|baht if i.status != 'void' else '-' }}</td><td>{{ status_badge(i.status) }}</td></tr>
-  {% else %}<tr><td colspan="9" class="muted">ไม่พบข้อมูล</td></tr>{% endfor %}
+      <td class="num">{{ i.total|baht }}</td><td class="num">{{ i.paid_amount|baht }}</td><td class="num">{{ (i.total - i.paid_amount)|baht if i.status != 'void' else '-' }}</td><td>{{ status_badge(i.status) }}</td>
+      <td class="no-print"><a class="btn btn-sm" href="{{ url_for('admin.invoice_detail', invoice_id=i.id, print=1) }}" title="พิมพ์ใบแจ้งหนี้">พิมพ์</a></td></tr>
+  {% else %}<tr><td colspan="10" class="muted">ไม่พบข้อมูล</td></tr>{% endfor %}
   </tbody>
-  {% if invoices %}<tfoot><tr><td colspan="5">รวม (ไม่นับที่ยกเลิก)</td><td class="num">{{ totals.total|baht }}</td><td class="num">{{ totals.paid|baht }}</td><td class="num">{{ (totals.total - totals.paid)|baht }}</td><td></td></tr></tfoot>{% endif %}
+  {% if invoices %}<tfoot><tr><td colspan="5">รวม (ไม่นับที่ยกเลิก)</td><td class="num">{{ totals.total|baht }}</td><td class="num">{{ totals.paid|baht }}</td><td class="num">{{ (totals.total - totals.paid)|baht }}</td><td></td><td></td></tr></tfoot>{% endif %}
 </table></div></div>
 {% endblock %}

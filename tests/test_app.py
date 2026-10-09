@@ -456,3 +456,35 @@ def test_shop_charges_and_all_in_one_sheet(app, client):
         assert get_db().execute("SELECT total FROM invoices WHERE unit_no='26/1'").fetchone()[0] == 535 + 100
     page = client.get(f"/admin/invoices/{inv['ร้าน 1']['id']}").get_data(as_text=True)
     assert "ร้านค้า" in page and "ค่ารักษามิเตอร์" in page
+
+
+def test_printing_options(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/new", {"unit_no": "26/1", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE charge_types SET active=0 WHERE method LIKE 'meter%'")
+        db.commit()
+    s.post("/admin/billing", {"period": "2026-10"})
+    with app.app_context():
+        inv = get_db().execute("SELECT * FROM invoices").fetchone()
+    # รับชำระ + พิมพ์ทันที -> ไปหน้าใบเสร็จพร้อม print=1
+    r = s.post(f"/admin/invoices/{inv['id']}/pay", {"amount": "100", "paid_at": "2026-10-05", "print_receipt": "1"})
+    assert "/admin/payments/" in r.headers["Location"] and "print=1" in r.headers["Location"]
+    # รับชำระหลายห้อง + พิมพ์ทันที -> หน้าพิมพ์ใบเสร็จเฉพาะที่เพิ่งรับ
+    r = s.post("/admin/payments/bulk", {"period": "2026-10", "paid_at": "2026-10-06", "method": "เงินสด",
+                                        f"pay_{inv['id']}": "1", f"amount_{inv['id']}": "180",
+                                        "print_receipt": "1", "layout": "half"})
+    loc = r.headers["Location"]
+    assert "/admin/receipts/print" in loc and "ids=" in loc and "print=1" in loc
+    page = client.get(loc).get_data(as_text=True)
+    assert page.count('class="half-sheet"') == 1 and "0002/10/2026" in page
+    # หน้าตั้งค่าเครื่องพิมพ์ ไฟล์ .bat และโหมดประหยัดหมึก
+    assert "L3350" in client.get("/admin/printer").get_data(as_text=True)
+    bat = client.get("/admin/printer/shortcut.bat")
+    body = bat.get_data(as_text=True)
+    assert bat.status_code == 200 and "--kiosk-printing" in body and "\r\n" in body and 'set "URL=http://localhost/"' in body
+    assert client.get("/admin/printer/test?print=1").status_code == 200
+    s.post("/admin/settings", {"condo_name": "x", "issue_day": "1", "due_days": "15", "print_mode": "eco"})
+    assert 'class="print-eco"' in client.get("/admin/printer").get_data(as_text=True)

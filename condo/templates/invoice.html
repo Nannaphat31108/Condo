@@ -45,6 +45,7 @@
     </div>
     <div class="field"><label>หมายเหตุ</label><input type="text" name="note"></div>
     <button class="btn btn-primary">บันทึกรับชำระ</button>
+    <label class="check inline" style="display:inline-flex;margin-left:1rem"><input type="checkbox" name="print_receipt" value="1" {{ 'checked' if settings.auto_print_receipt != '0' }}> พิมพ์ใบเสร็จทันที</label>
   </form>
   {% endif %}
 

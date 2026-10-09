@@ -301,3 +301,28 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 .sheet .sticky-r { position: sticky; right: 0; background: #fff; z-index: 1; box-shadow: -1px 0 0 var(--line); min-width: 100px; }
 .sheet th.sticky-r { z-index: 3; background: #fafbfc; }
 .sheet tr.billed .sticky-r { background: #f6f9f7; }
+
+/* ===== การพิมพ์: A4 ขอบ 10 มม. (Epson L3350) ===== */
+@page { size: A4; margin: 10mm; }
+.steps { padding-left: 1.2rem; margin: 0 0 1rem; }
+.steps li { margin-bottom: .45rem; }
+.print-test { text-align: center; border: 2px dashed #999; min-height: 120mm; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; }
+.print-test .swatches { display: flex; gap: .4rem; }
+.print-test .swatches span { width: 40px; height: 22px; border-radius: 4px; }
+
+/* โหมดประหยัดหมึก: ขาวดำ ไม่มีพื้นหลังสี */
+@media print {
+  .print-eco .bill { --b-main: #000; --b-accent: #000; --b-soft: #fff; --b-line: #555; --b-ink: #000; color: #000; }
+  .print-eco .bill-watermark { display: none; }
+  .print-eco .bill-logo { filter: grayscale(1); }
+  .print-eco .bill-title { background: #fff; color: #000; border: 2px solid #000; }
+  .print-eco .bill-room { background: #fff; }
+  .print-eco .bill-items th { background: #fff; color: #000; border-bottom: 1.5px solid #000; }
+  .print-eco .bill-items tbody tr:nth-child(even) td { background: #fff; }
+  .print-eco .bill-total-amount { background: #fff; color: #000; border: 2px solid #000; }
+  .print-eco .bill-total-amount .label { color: #333; }
+  .print-eco .invoice-pay { background: #fff; border: 1px solid #555; }
+  .print-eco .bill-items .flat { background: #fff; border: 1px solid #555; color: #000; }
+  .print-eco .bill-pay .box.on::before { background: #000; border-color: #000; }
+  .print-eco .print-test .swatches { display: none; }
+}

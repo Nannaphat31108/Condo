@@ -21,6 +21,10 @@ def create_app(test_config=None):
     )
     if test_config:
         app.config.update(test_config)
+    if os.environ.get("RENDER"):
+        # อยู่หลัง proxy ของ Render: ให้รู้ว่าเว็บเปิดผ่าน https และชื่อโดเมนจริง
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
     os.makedirs(app.instance_path, exist_ok=True)
     os.makedirs(os.path.dirname(os.path.abspath(app.config["DATABASE"])), exist_ok=True)
 

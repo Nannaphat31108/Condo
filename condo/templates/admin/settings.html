@@ -35,6 +35,14 @@
         <textarea name="penalty_types" rows="3">{{ settings.penalty_types }}</textarea>
         <div class="help">แอดมินกรอกจำนวนเงินเบี้ยปรับเองที่เมนู "กรอกเบี้ยปรับ" หรือในหน้าใบแจ้งหนี้แต่ละใบ เช่น เบี้ยปรับ, เบี้ยปรับค่าน้ำ</div></div>
       <p class="help">เลขที่ใบแจ้งหนี้และใบเสร็จรันใหม่ทุกเดือน รูปแบบ ลำดับ/เดือน/ปี เช่น 0001/10/2026</p>
+      <h2 style="margin-top:1.5rem">การพิมพ์</h2>
+      <div class="field"><label>รูปแบบการพิมพ์</label>
+        <select name="print_mode">
+          <option value="color" {{ 'selected' if settings.print_mode != 'eco' }}>พิมพ์สี (สวยงาม)</option>
+          <option value="eco" {{ 'selected' if settings.print_mode == 'eco' }}>ประหยัดหมึก (ขาวดำ ไม่มีพื้นหลังสี)</option>
+        </select></div>
+      <div class="field"><label class="check"><input type="checkbox" name="auto_print_receipt" value="1" {{ 'checked' if settings.auto_print_receipt != '0' }}> รับชำระแล้วพิมพ์ใบเสร็จทันที</label></div>
+      <p class="help">ตั้งค่าเครื่องพิมพ์ Epson L3350 ให้พิมพ์ได้ทันทีที่ <a href="{{ url_for('admin.printer') }}">ตั้งค่าเครื่องพิมพ์</a></p>
       <h2 style="margin-top:1.5rem">สำรองข้อมูล</h2>
       <p class="small">ข้อมูลทั้งหมดเก็บย้อนหลังในฐานข้อมูล ควรดาวน์โหลดไฟล์สำรองเก็บไว้เป็นประจำ</p>
       <a class="btn" href="{{ url_for('admin.backup') }}">ดาวน์โหลดไฟล์สำรองข้อมูล</a>

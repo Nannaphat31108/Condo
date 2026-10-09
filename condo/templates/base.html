@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
+<body class="{{ 'print-eco' if settings.print_mode == 'eco' }}">
 {% if g.user %}
 <div class="topbar no-print">
   <strong>{{ settings.condo_name }}</strong>
@@ -36,6 +36,7 @@
         <a href="{{ url_for('admin.charges') }}" class="{{ 'active' if ep.startswith('admin.charge') }}">ตั้งค่าค่าบริการ</a>
         <a href="{{ url_for('admin.users') }}" class="{{ 'active' if ep.startswith('admin.user') }}">ผู้ใช้งานระบบ</a>
         <a href="{{ url_for('admin.settings_page') }}" class="{{ 'active' if ep == 'admin.settings_page' }}">ตั้งค่าทั่วไป</a>
+        <a href="{{ url_for('admin.printer') }}" class="{{ 'active' if ep == 'admin.printer' }}">ตั้งค่าเครื่องพิมพ์</a>
         <a href="{{ url_for('admin.activity') }}" class="{{ 'active' if ep == 'admin.activity' }}">ประวัติการใช้งาน</a>
       {% else %}
         <a href="{{ url_for('resident.home') }}" class="{{ 'active' if ep == 'resident.home' }}">บิลของฉัน</a>
@@ -66,6 +67,19 @@ document.addEventListener('submit', function (e) {
   var msg = e.target.getAttribute('data-confirm');
   if (msg && !confirm(msg)) e.preventDefault();
 });
+</script>
+<script>
+// เปิดหน้าพร้อม ?print=1 = สั่งพิมพ์ทันที (ถ้าเปิดผ่านไฟล์ condo-print.bat จะส่งเข้าเครื่องพิมพ์เลยโดยไม่ถาม)
+if (/[?&]print=1(&|$)/.test(location.search)) {
+  window.addEventListener('load', function () {
+    var imgs = Array.prototype.slice.call(document.images).filter(function (i) { return !i.complete; });
+    var go = function () { setTimeout(function () { window.print(); }, 250); };
+    if (!imgs.length) return go();
+    var left = imgs.length;
+    imgs.forEach(function (i) { i.addEventListener('load', done); i.addEventListener('error', done); });
+    function done() { if (--left === 0) go(); }
+  });
+}
 </script>
 {% block scripts %}{% endblock %}
 </body>

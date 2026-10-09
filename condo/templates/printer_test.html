@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}ทดสอบเครื่องพิมพ์{% endblock %}
+{% block content %}
+<div class="page-head no-print"><h1>หน้าทดสอบเครื่องพิมพ์</h1>
+  <div class="actions"><a class="btn" href="{{ url_for('admin.printer') }}">กลับ</a><button class="btn btn-primary" onclick="window.print()">พิมพ์</button></div></div>
+<div class="bill print-test">
+  <img class="bill-logo" src="{{ settings.logo or url_for('static', filename='logo.png') }}" alt="">
+  <h2>ทดสอบการพิมพ์ — {{ settings.condo_name }}</h2>
+  <p>ถ้าเห็นหน้านี้บนกระดาษ A4 ครบทั้งกรอบ แปลว่าตั้งค่าเครื่องพิมพ์ถูกต้องแล้ว</p>
+  <div class="swatches"><span style="background:#1d5f9e"></span><span style="background:#2aa1c8"></span><span style="background:#17707f"></span><span style="background:#3fb3a3"></span><span style="background:#000"></span></div>
+  <p class="small">ภาษาไทย: กขคง ฟ้าใส สระ ุ ู ิ ี ึ ื วรรณยุกต์ ่ ้ ๊ ๋ · ตัวเลข 0123456789 · ๑๒๓๔๕๖๗๘๙</p>
+</div>
+{% endblock %}

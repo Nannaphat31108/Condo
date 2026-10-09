@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>ตั้งค่าเครื่องพิมพ์ Epson L3350</h1>
+<p class="muted">ทำครั้งเดียวที่คอมพิวเตอร์ (Windows) ที่ต่อสาย USB กับเครื่องพิมพ์ หลังจากนั้นกด "พิมพ์" ในระบบแล้วกระดาษออกทันที ไม่ต้องกดยืนยันซ้ำ</p>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>ขั้นที่ 1 · ตั้ง L3350 เป็นเครื่องพิมพ์หลัก</h2>
+    <ol class="steps">
+      <li>ติดตั้งไดรเวอร์ Epson L3350 ให้เรียบร้อย (ถ้าเคยพิมพ์จากเครื่องนี้ได้แล้ว ข้ามได้)</li>
+      <li>เปิด <b>Settings → Bluetooth &amp; devices → Printers &amp; scanners</b></li>
+      <li>ปิดตัวเลือก <b>"Let Windows manage my default printer"</b></li>
+      <li>คลิก <b>EPSON L3350 Series</b> → <b>Set as default</b></li>
+      <li>ใน <b>Printing preferences</b> ตั้งกระดาษเป็น <b>A4</b> (คุณภาพ "Standard" พอ ประหยัดหมึก)</li>
+    </ol>
+  </div>
+  <div class="card">
+    <h2>ขั้นที่ 2 · ไฟล์เปิดระบบแบบพิมพ์ทันที</h2>
+    <ol class="steps">
+      <li>กดปุ่มด้านล่างเพื่อดาวน์โหลดไฟล์ <code>condo-print.bat</code></li>
+      <li>ย้ายไฟล์ไปไว้ที่ <b>หน้าจอ (Desktop)</b></li>
+      <li>ปิด Chrome/Edge ที่เปิดอยู่ให้หมด แล้วดับเบิลคลิก <b>condo-print.bat</b> ทุกครั้งที่จะใช้งานระบบ
+        <div class="help">ถ้า Windows เตือน "Windows protected your PC" ให้กด More info → Run anyway</div></li>
+      <li>เข้าสู่ระบบครั้งแรกในหน้าต่างนี้ (ระบบจะจำไว้)</li>
+    </ol>
+    <a class="btn btn-primary" href="{{ url_for('admin.printer_shortcut') }}">ดาวน์โหลดไฟล์ condo-print.bat</a>
+    <p class="help">ไฟล์นี้เปิด {{ site }} ด้วย Chrome (หรือ Edge) โหมด <code>--kiosk-printing</code> ซึ่งส่งงานพิมพ์เข้าเครื่องพิมพ์หลักทันที</p>
+  </div>
+</div>
+
+<div class="card">
+  <h2>ขั้นที่ 3 · ทดสอบ</h2>
+  <p>เปิดระบบผ่านไฟล์ <b>condo-print.bat</b> แล้วกดปุ่มนี้ — ถ้าตั้งค่าถูก กระดาษทดสอบจะออกทันทีโดยไม่มีหน้าต่างถาม</p>
+  <a class="btn btn-primary" href="{{ url_for('admin.printer_test', print=1) }}">พิมพ์หน้าทดสอบ</a>
+  <a class="btn" href="{{ url_for('admin.printer_test') }}">ดูหน้าทดสอบ</a>
+</div>
+
+<div class="card">
+  <h2>พิมพ์ได้จากตรงไหนบ้าง</h2>
+  <ul class="steps">
+    <li><b>รับชำระ</b> (ทีละห้อง / หลายห้อง): ติ๊ก "พิมพ์ใบเสร็จทันที" → บันทึกแล้วใบเสร็จออกเลย</li>
+    <li><b>ใบแจ้งหนี้ / รับชำระ</b>: ปุ่ม "พิมพ์" ท้ายแต่ละแถว</li>
+    <li><b>ออกใบแจ้งหนี้</b>: พิมพ์ใบแจ้งหนี้ทั้งงวด / พิมพ์ใบเสร็จทั้งงวด (เลือก 2 ใบต่อ A4 ได้)</li>
+  </ul>
+  <p class="help">อยากประหยัดหมึก: ไปที่ <a href="{{ url_for('admin.settings_page') }}">ตั้งค่าทั่วไป → รูปแบบการพิมพ์ → ประหยัดหมึก</a> ·
+    ถ้าเปิดระบบแบบปกติ (ไม่ผ่านไฟล์ .bat) ก็ยังพิมพ์ได้ จะมีหน้าต่างให้เลือกเครื่องพิมพ์ก่อน</p>
+</div>
+{% endblock %}

@@ -2,6 +2,7 @@
 import base64
 import csv
 import io
+import os
 import re
 import json
 import sqlite3
@@ -964,6 +965,11 @@ def payments_bulk():
             flash("จำนวนเงินไม่ถูกต้อง (ยังไม่บันทึก): ห้อง " + ", ".join(errors), "error")
         if not receipts and not errors:
             flash("ยังไม่ได้เลือกห้องที่ชำระ", "info")
+        if receipts and request.form.get("print_receipt"):
+            ids = [r[0] for r in db.execute(
+                f"SELECT id FROM payments WHERE receipt_no IN ({','.join('?' * len(receipts))})", receipts)]
+            return redirect(url_for("admin.receipts_print", ids=",".join(map(str, ids)), print=1,
+                                    layout=request.form.get("layout", "full"), period=period))
         return redirect(url_for("admin.payments_bulk", period=period))
     return render_template("admin/payments_bulk.html", period=period, invoices=invoices_,
                            methods=PAYMENT_METHODS, today=date.today().isoformat())
@@ -977,7 +983,12 @@ def receipts_print():
     period = get_period_arg()
     by = "paid" if request.args.get("by") == "paid" else "invoice"
     layout = "half" if request.args.get("layout") == "half" else "full"
-    if by == "paid":
+    ids = [int(x) for x in request.args.get("ids", "").split(",") if x.isdigit()]
+    if ids:  # ใบเสร็จที่เพิ่งรับชำระ
+        rows = db.execute(f"SELECT p.* FROM payments p JOIN invoices i ON i.id=p.invoice_id"
+                          f" WHERE p.id IN ({','.join('?' * len(ids))}) ORDER BY length(i.unit_no), i.unit_no, p.id",
+                          ids).fetchall()
+    elif by == "paid":
         rows = db.execute("SELECT p.* FROM payments p WHERE substr(p.paid_at,1,7)=? ORDER BY p.paid_at, p.id",
                           (period,)).fetchall()
     else:
@@ -1008,6 +1019,9 @@ def invoice_pay(invoice_id):
                                     request.form.get("reference", "").strip(), request.form.get("note", "").strip())
         db.commit()
         flash(f"บันทึกรับชำระเรียบร้อย ใบเสร็จเลขที่ {receipt_no}", "success")
+        if request.form.get("print_receipt"):
+            payment_id = db.execute("SELECT id FROM payments WHERE receipt_no=?", (receipt_no,)).fetchone()[0]
+            return redirect(url_for("admin.receipt", payment_id=payment_id, print=1))
     return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))
 
 
@@ -1270,6 +1284,10 @@ def settings_page():
             value = logo if key == "logo" else request.form.get(key, "").strip()
             if key in ("issue_day", "due_days"):
                 value = str(max(int(to_float(value, 1)), 0))
+            if key == "print_mode" and value not in ("color", "eco"):
+                value = "color"
+            if key == "auto_print_receipt":
+                value = "1" if value else "0"
             if key == "penalty_types":
                 value = "\n".join(dict.fromkeys(x.strip() for x in value.splitlines() if x.strip()))
             db.execute("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -1279,6 +1297,45 @@ def settings_page():
         flash("บันทึกการตั้งค่าเรียบร้อย", "success")
         return redirect(url_for("admin.settings_page"))
     return render_template("admin/settings.html")
+
+
+def site_url():
+    url = request.url_root
+    if os.environ.get("RENDER") and url.startswith("http://"):
+        url = "https://" + url[len("http://"):]
+    return url
+
+
+@bp.route("/printer")
+@admin_required
+def printer():
+    return render_template("admin/printer.html", site=site_url())
+
+
+@bp.route("/printer/test")
+@admin_required
+def printer_test():
+    return render_template("printer_test.html")
+
+
+@bp.route("/printer/shortcut.bat")
+@admin_required
+def printer_shortcut():
+    """ไฟล์เปิดระบบบน Windows ด้วย Chrome/Edge โหมดพิมพ์ทันที (ไม่ถามหน้าต่างพิมพ์ ส่งเข้าเครื่องพิมพ์หลักเลย)"""
+    lines = [
+        "@echo off",
+        "REM Condo: open the system with direct printing to the default printer (Epson L3350)",
+        f'set "URL={site_url()}"',
+        r'set "BROWSER=%ProgramFiles%\Google\Chrome\Application\chrome.exe"',
+        r'if not exist "%BROWSER%" set "BROWSER=%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"',
+        r'if not exist "%BROWSER%" set "BROWSER=%LocalAppData%\Google\Chrome\Application\chrome.exe"',
+        r'if not exist "%BROWSER%" set "BROWSER=%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"',
+        r'if not exist "%BROWSER%" set "BROWSER=%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"',
+        r'if not exist "%BROWSER%" (echo Chrome or Edge not found & pause & exit /b 1)',
+        r'start "" "%BROWSER%" --kiosk-printing --user-data-dir="%LocalAppData%\CondoPrint" "%URL%"',
+    ]
+    return Response("\r\n".join(lines) + "\r\n", mimetype="application/octet-stream",
+                    headers={"Content-Disposition": "attachment; filename=condo-print.bat"})
 
 
 @bp.route("/backup")
