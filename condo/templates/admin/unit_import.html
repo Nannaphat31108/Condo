@@ -2,9 +2,25 @@
 {% from "_macros.html" import csrf %}
 {% block content %}
 <h1>เพิ่มห้องจำนวนมาก</h1>
+<div class="card">
+  <h2>สร้างห้องเลขเรียงต่อกันทั้งอาคาร</h2>
+  <p class="small muted">เช่น ชั้น 1 มี 22 ห้อง (26/1–26/22) ชั้น 2–5 ชั้นละ 44 ห้อง (ชั้น 2 = 26/23–26/66 …) เลขห้องที่มีอยู่แล้วจะถูกข้าม</p>
+  <form method="post" id="seq-form">
+    {{ csrf() }}<input type="hidden" name="mode" value="sequence">
+    <div class="form-row">
+      <div class="field"><label>คำนำหน้าเลขห้อง</label><input type="text" name="prefix" value="26/"></div>
+      <div class="field"><label>เริ่มที่เลข</label><input type="number" name="start_no" value="1" min="0" required></div>
+      <div class="field"><label>เริ่มที่ชั้น</label><input type="number" name="first_floor" value="1" min="0" required></div>
+      <div class="field"><label>อาคาร</label><input type="text" name="building" value="26"></div>
+    </div>
+    <div class="field"><label>จำนวนห้องแต่ละชั้น (คั่นด้วย ,)</label><input type="text" name="floor_counts" value="22,44,44,44,44" required></div>
+    <div class="preview-box" id="seq-preview"></div>
+    <button class="btn btn-primary" style="margin-top:.75rem">สร้างห้อง</button>
+  </form>
+</div>
 <div class="grid grid-2">
   <div class="card">
-    <h2>สร้างห้องอัตโนมัติตามชั้น</h2>
+    <h2>สร้างห้องอัตโนมัติตามชั้น (เลขชั้น+เลขห้อง)</h2>
     <form method="post">
       {{ csrf() }}<input type="hidden" name="mode" value="generate">
       <div class="form-row">
@@ -40,7 +56,18 @@
 {% endblock %}
 {% block scripts %}
 <script>
-var f = document.querySelector('input[name=mode]').form;
+(function () {
+  var f = document.getElementById('seq-form');
+  function show() {
+    var counts = f.floor_counts.value.split(/[\s,]+/).filter(Boolean).map(Number);
+    var n = +f.start_no.value, fl = +f.first_floor.value, p = f.prefix.value, lines = [], total = 0;
+    if (!counts.length || counts.some(isNaN)) { document.getElementById('seq-preview').textContent = 'กรุณากรอกจำนวนห้องแต่ละชั้น'; return; }
+    counts.forEach(function (c, i) { lines.push('ชั้น ' + (fl + i) + ': ' + p + n + ' – ' + p + (n + c - 1) + ' (' + c + ' ห้อง)'); n += c; total += c; });
+    document.getElementById('seq-preview').innerHTML = lines.join('<br>') + '<br><b>รวม ' + total + ' ห้อง</b>';
+  }
+  f.addEventListener('input', show); show();
+})();
+var f = document.querySelector('input[name=mode][value=generate]').form;
 function pad(n, d) { n = String(n); while (n.length < d) n = '0' + n; return n; }
 function show() {
   var a = +f.floor_from.value, b = +f.floor_to.value, n = +f.per_floor.value, d = +f.digits.value, p = f.prefix.value;

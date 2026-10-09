@@ -249,7 +249,7 @@ def generate_invoices(db, period, settings, unit_ids=None):
     if unit_ids:
         query += f" AND id IN ({','.join('?' * len(unit_ids))})"
         params = list(unit_ids)
-    units = db.execute(query + " ORDER BY unit_no", params).fetchall()
+    units = db.execute(query + " ORDER BY length(unit_no), unit_no", params).fetchall()
 
     result = {"created": [], "skipped_existing": [], "missing_meter": [], "empty": []}
     for unit in units:

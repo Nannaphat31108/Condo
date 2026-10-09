@@ -352,3 +352,19 @@ def test_owner_and_tenant_on_bill(app, client):
     page = client.get(f"/admin/invoices/{inv['id']}").get_data(as_text=True)
     assert "เจ้าของห้องชุด" in page and "ผู้เช่า" in page and "สมศรี ผู้เช่า" in page
     assert 'name="email"' not in client.get("/admin/units/new").get_data(as_text=True)
+
+
+def test_sequential_rooms_khlong_chan_26(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/import", {"mode": "sequence", "prefix": "26/", "start_no": "1", "first_floor": "1",
+                                   "building": "26", "floor_counts": "22,44,44,44,44"})
+    with app.app_context():
+        rows = get_db().execute("SELECT unit_no, floor FROM units ORDER BY length(unit_no), unit_no").fetchall()
+    units = {r["unit_no"]: r["floor"] for r in rows}
+    assert len(units) == 198
+    assert (units["26/1"], units["26/22"], units["26/23"], units["26/66"]) == ("1", "1", "2", "2")
+    assert (units["26/67"], units["26/110"], units["26/111"], units["26/155"], units["26/198"]) == ("3", "3", "4", "5", "5")
+    assert [r["unit_no"] for r in rows][:3] == ["26/1", "26/2", "26/3"]
+    page = client.get("/admin/units").get_data(as_text=True)
+    assert page.index(">26/2<") < page.index(">26/10<") < page.index(">26/100<")

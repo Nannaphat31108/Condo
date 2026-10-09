@@ -2,6 +2,7 @@
 import base64
 import csv
 import io
+import re
 import json
 import sqlite3
 from datetime import date
@@ -96,7 +97,7 @@ def units():
         sql += (" WHERE u.unit_no LIKE ? OR u.owner_name LIKE ? OR u.phone LIKE ?"
                 " OR u.tenant_name LIKE ? OR u.tenant_phone LIKE ?")
         params = [f"%{q}%"] * 5
-    rows = get_db().execute(sql + " ORDER BY u.active DESC, u.unit_no", params).fetchall()
+    rows = get_db().execute(sql + " ORDER BY u.active DESC, length(u.unit_no), u.unit_no", params).fetchall()
     return render_template("admin/units.html", units=rows, q=q)
 
 
@@ -143,6 +144,36 @@ def unit_import():
     if request.method == "POST":
         db = get_db()
         added, skipped = 0, []
+        if request.form.get("mode") == "sequence":
+            # เลขห้องเรียงต่อกันทั้งตึก เช่น ชั้น 1 = 26/1-26/22, ชั้น 2 = 26/23-26/66
+            prefix = request.form.get("prefix", "").strip()
+            number = request.form.get("start_no", type=int) or 1
+            floor = request.form.get("first_floor", type=int) or 1
+            building = request.form.get("building", "").strip()
+            area = to_float(request.form.get("area_sqm"))
+            try:
+                counts = [int(x) for x in re.split(r"[,\s]+", request.form.get("floor_counts", "").strip()) if x]
+            except ValueError:
+                counts = []
+            if not counts or any(c < 1 or c > 500 for c in counts) or len(counts) > 100:
+                flash("กรุณากรอกจำนวนห้องแต่ละชั้นเป็นตัวเลข คั่นด้วยจุลภาค เช่น 22,44,44,44,44", "error")
+                return redirect(url_for("admin.unit_import"))
+            for count in counts:
+                for _ in range(count):
+                    unit_no = f"{prefix}{number}"
+                    try:
+                        db.execute("INSERT INTO units (unit_no, building, floor, area_sqm) VALUES (?,?,?,?)",
+                                   (unit_no, building, str(floor), area))
+                        added += 1
+                    except sqlite3.IntegrityError:
+                        skipped.append(unit_no)
+                    number += 1
+                floor += 1
+            log_activity(g.user, f"สร้างห้องเลขเรียงต่อกัน {added} ห้อง")
+            db.commit()
+            flash(f"สร้างห้องเรียบร้อย {added} ห้อง" + (f" (ข้ามเลขห้องที่มีอยู่แล้ว {len(skipped)} ห้อง)" if skipped else ""),
+                  "success")
+            return redirect(url_for("admin.units"))
         if request.form.get("mode") == "generate":
             first = request.form.get("floor_from", type=int) or 1
             last = request.form.get("floor_to", type=int) or first
@@ -240,7 +271,7 @@ def user_form(user_id=None):
     db = get_db()
     user = get_or_404("SELECT * FROM users WHERE id=?", (user_id,)) if user_id else None
     units_list = db.execute("SELECT id, unit_no, owner_name, tenant_name FROM units WHERE active=1"
-                            " ORDER BY unit_no").fetchall()
+                            " ORDER BY length(unit_no), unit_no").fetchall()
     if request.method == "POST":
         data = {
             "username": request.form.get("username", "").strip(),
@@ -327,7 +358,7 @@ def charges():
 def charge_form(charge_id=None):
     db = get_db()
     ct = get_or_404("SELECT * FROM charge_types WHERE id=?", (charge_id,)) if charge_id else None
-    units_list = db.execute("SELECT * FROM units WHERE active=1 ORDER BY unit_no").fetchall()
+    units_list = db.execute("SELECT * FROM units WHERE active=1 ORDER BY length(unit_no), unit_no").fetchall()
     selections = {}
     if charge_id:
         selections = {r["unit_id"]: r["amount_override"] for r in
@@ -446,7 +477,7 @@ def meters():
     period = get_period_arg()
     ct_id = request.values.get("charge_type_id", type=int) or meter_types[0]["id"]
     ct = next((m for m in meter_types if m["id"] == ct_id), meter_types[0])
-    units_list = db.execute("SELECT * FROM units WHERE active=1 ORDER BY unit_no").fetchall()
+    units_list = db.execute("SELECT * FROM units WHERE active=1 ORDER BY length(unit_no), unit_no").fetchall()
 
     if request.method == "POST":
         errors, saved = [], 0
@@ -519,7 +550,7 @@ def meters():
 def adhoc():
     db = get_db()
     period = get_period_arg()
-    units_list = db.execute("SELECT * FROM units WHERE active=1 ORDER BY unit_no").fetchall()
+    units_list = db.execute("SELECT * FROM units WHERE active=1 ORDER BY length(unit_no), unit_no").fetchall()
     if request.method == "POST":
         unit_ids = [int(x) for x in request.form.getlist("unit_ids") if x.isdigit()]
         description = request.form.get("description", "").strip()
@@ -582,7 +613,7 @@ def billing_page():
             "SELECT COUNT(*) FROM meter_readings r JOIN units u ON u.id=r.unit_id"
             " WHERE r.charge_type_id=? AND r.period=? AND u.active=1", (m["id"], period)).fetchone()[0]
         meter_status.append({"ct": m, "done": done})
-    invoices = db.execute("SELECT * FROM invoices WHERE period=? ORDER BY unit_no", (period,)).fetchall()
+    invoices = db.execute("SELECT * FROM invoices WHERE period=? ORDER BY length(unit_no), unit_no", (period,)).fetchall()
     pending_adhoc = db.execute("SELECT COUNT(*) FROM adhoc_charges WHERE invoice_id IS NULL AND period<=?",
                                (period,)).fetchone()[0]
     issue_date, due_date = billing.billing_dates(period, get_settings())
@@ -609,7 +640,7 @@ def invoices():
     if q:
         sql += " AND (unit_no LIKE ? OR owner_name LIKE ? OR tenant_name LIKE ? OR invoice_no LIKE ?)"
         params += [f"%{q}%"] * 4
-    rows = db.execute(sql + " ORDER BY period DESC, unit_no LIMIT 1000", params).fetchall()
+    rows = db.execute(sql + " ORDER BY period DESC, length(unit_no), unit_no LIMIT 1000", params).fetchall()
     totals = {
         "total": sum(r["total"] for r in rows if r["status"] != "void"),
         "paid": sum(r["paid_amount"] for r in rows if r["status"] != "void"),
@@ -659,7 +690,7 @@ def payments_bulk():
     db = get_db()
     period = get_period_arg()
     invoices_ = db.execute(
-        "SELECT * FROM invoices WHERE period=? AND status IN ('unpaid','partial') ORDER BY unit_no", (period,)
+        "SELECT * FROM invoices WHERE period=? AND status IN ('unpaid','partial') ORDER BY length(unit_no), unit_no", (period,)
     ).fetchall()
     if request.method == "POST":
         paid_at = request.form.get("paid_at") or date.today().isoformat()
@@ -700,7 +731,7 @@ def receipts_print():
                           (period,)).fetchall()
     else:
         rows = db.execute("SELECT p.* FROM payments p JOIN invoices i ON i.id=p.invoice_id WHERE i.period=?"
-                          " ORDER BY i.unit_no, p.id", (period,)).fetchall()
+                          " ORDER BY length(i.unit_no), i.unit_no, p.id", (period,)).fetchall()
     docs = []
     for p in rows:
         inv, items, _payments, unit = load_invoice(p["invoice_id"])
@@ -792,7 +823,7 @@ def penalties():
     db = get_db()
     period = get_period_arg()
     types = penalty_type_list()
-    invoices_ = db.execute("SELECT * FROM invoices WHERE period=? AND status!='void' ORDER BY unit_no",
+    invoices_ = db.execute("SELECT * FROM invoices WHERE period=? AND status!='void' ORDER BY length(unit_no), unit_no",
                            (period,)).fetchall()
     if request.method == "POST":
         changed, errors = 0, []
@@ -869,7 +900,7 @@ def invoices_print():
     period = get_period_arg()
     db = get_db()
     ids = [r["id"] for r in db.execute(
-        "SELECT id FROM invoices WHERE period=? AND status!='void' ORDER BY unit_no", (period,))]
+        "SELECT id FROM invoices WHERE period=? AND status!='void' ORDER BY length(unit_no), unit_no", (period,))]
     docs = [load_invoice(i) for i in ids]
     return render_template("invoice_batch.html", docs=docs, period=period)
 
@@ -922,7 +953,7 @@ def export_invoices():
     if year.isdigit():
         sql += " WHERE period LIKE ?"
         params.append(f"{year}-%")
-    rows = db.execute(sql + " ORDER BY period, unit_no", params).fetchall()
+    rows = db.execute(sql + " ORDER BY period, length(unit_no), unit_no", params).fetchall()
     return csv_response(
         f"invoices{('-' + year) if year else ''}.csv",
         ["เลขที่", "งวด", "ห้อง", "เจ้าของ", "ผู้เช่า", "วันที่ออก", "ครบกำหนด", "ก่อนภาษี", "VAT", "ยอดรวม", "ชำระแล้ว",
@@ -944,7 +975,7 @@ def export_items():
     if year.isdigit():
         sql += " WHERE i.period LIKE ?"
         params.append(f"{year}-%")
-    rows = db.execute(sql + " ORDER BY i.period, i.unit_no, ii.sort_order", params).fetchall()
+    rows = db.execute(sql + " ORDER BY i.period, length(i.unit_no), i.unit_no, ii.sort_order", params).fetchall()
     return csv_response(
         f"invoice-items{('-' + year) if year else ''}.csv",
         ["เลขที่บิล", "งวด", "ห้อง", "สถานะ", "รายการ", "รายละเอียด", "จำนวน", "หน่วย", "ราคาต่อหน่วย", "จำนวนเงิน",
