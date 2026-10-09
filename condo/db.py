@@ -197,7 +197,7 @@ SHOP_CHARGE_TYPES = [
     dict(name="ค่าน้ำประปา (ร้านค้า)", method="meter_rate", rate=18, unit_label="หน่วย", sort_order=10, active=1,
          unit_type="shop", description="หน่วยละ 18 บาท"),
     dict(name="ค่ารักษามิเตอร์", method="fixed", rate=25, unit_label="เดือน", sort_order=11, active=1,
-         unit_type="shop", description="ค่ารักษามิเตอร์น้ำ 25 บาทต่อเดือน"),
+         unit_type="all", description="ค่ารักษามิเตอร์น้ำ 25 บาทต่อเดือน (ห้องชุดและร้านค้า)"),
     dict(name="ค่าไฟฟ้า (ร้านค้า)", method="meter_rate", rate=8, unit_label="หน่วย", sort_order=20, active=1,
          unit_type="shop", description="หน่วยละ 8 บาท"),
 ]
@@ -307,6 +307,16 @@ def init_db(db):
     if not db.execute("SELECT 1 FROM settings WHERE key='_room_electric_off'").fetchone():
         db.execute("UPDATE charge_types SET active=0 WHERE name='ค่าไฟฟ้า' AND unit_type='room'")
         db.execute("INSERT INTO settings (key, value) VALUES ('_room_electric_off', '1')")
+    # ค่ารักษามิเตอร์ 25 บาท เก็บทั้งห้องชุดและร้านค้า (ครั้งเดียว)
+    if not db.execute("SELECT 1 FROM settings WHERE key='_meter_fee_all'").fetchone():
+        if db.execute("SELECT 1 FROM settings WHERE key='_shop_charges_seeded'").fetchone():
+            fee = db.execute("SELECT id FROM charge_types WHERE name='ค่ารักษามิเตอร์'").fetchone()
+            if fee:
+                db.execute("UPDATE charge_types SET unit_type='all', active=1, description=? WHERE id=?",
+                           ("ค่ารักษามิเตอร์น้ำ 25 บาทต่อเดือน (ห้องชุดและร้านค้า)", fee["id"]))
+            else:
+                insert_charge_type(db, {**SHOP_CHARGE_TYPES[2]})
+        db.execute("INSERT INTO settings (key, value) VALUES ('_meter_fee_all', '1')")
     # เพิ่มค่าบริการร้านค้าครั้งเดียว (ถ้าแอดมินลบทิ้งภายหลังจะไม่สร้างซ้ำ)
     if not db.execute("SELECT 1 FROM settings WHERE key='_shop_charges_seeded'").fetchone():
         if not db.execute("SELECT 1 FROM charge_types WHERE unit_type='shop'").fetchone():

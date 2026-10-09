@@ -250,6 +250,30 @@ def unit_detail(unit_id):
     return render_template("admin/unit_detail.html", unit=unit, invoices=invoices, readings=readings, users=users)
 
 
+def reset_unit_data(db, unit_id, clear_contacts=False):
+    """ล้างข้อมูลการเงินของห้อง (บิล ใบเสร็จ มิเตอร์ รายการเพิ่มเติม) แต่เก็บห้องไว้"""
+    db.execute("DELETE FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE unit_id=?)", (unit_id,))
+    db.execute("DELETE FROM adhoc_charges WHERE unit_id=?", (unit_id,))
+    db.execute("DELETE FROM invoices WHERE unit_id=?", (unit_id,))
+    db.execute("DELETE FROM meter_readings WHERE unit_id=?", (unit_id,))
+    db.execute("DELETE FROM bill_exclusions WHERE unit_id=?", (unit_id,))
+    if clear_contacts:
+        db.execute("UPDATE units SET owner_name='', phone='', tenant_name='', tenant_phone='', note='' WHERE id=?",
+                   (unit_id,))
+
+
+@bp.route("/units/<int:unit_id>/reset", methods=("POST",))
+@admin_required
+def unit_reset(unit_id):
+    db = get_db()
+    unit = get_or_404("SELECT * FROM units WHERE id=?", (unit_id,))
+    reset_unit_data(db, unit_id, bool(request.form.get("clear_contacts")))
+    log_activity(g.user, f"รีเซ็ตข้อมูลห้อง {unit['unit_no']}")
+    db.commit()
+    flash(f"รีเซ็ตข้อมูลห้อง {unit['unit_no']} แล้ว (ลบบิล ใบเสร็จ เลขมิเตอร์ และรายการเพิ่มเติมทั้งหมด)", "success")
+    return redirect(url_for("admin.unit_detail", unit_id=unit_id))
+
+
 def natural_key(unit_no):
     return (len(unit_no), unit_no)
 
@@ -269,6 +293,14 @@ def unit_bulk_delete():
             " (SELECT COUNT(*) FROM payments p JOIN invoices i ON i.id=p.invoice_id WHERE i.unit_id=u.id) AS payment_count"
             " FROM units u ORDER BY length(u.unit_no), u.unit_no").fetchall()
             if lo <= natural_key(u["unit_no"]) <= hi]
+    if request.method == "POST" and request.form.get("action") == "reset":
+        clear_contacts = bool(request.form.get("clear_contacts"))
+        for u in units_:
+            reset_unit_data(db, u["id"], clear_contacts)
+        log_activity(g.user, f"รีเซ็ตข้อมูล {len(units_)} ห้อง ({first} ถึง {last})")
+        db.commit()
+        flash(f"รีเซ็ตข้อมูลแล้ว {len(units_)} ห้อง (เก็บห้องไว้ ลบบิล ใบเสร็จ เลขมิเตอร์ และรายการเพิ่มเติม)", "success")
+        return redirect(url_for("admin.units"))
     if request.method == "POST":
         include_history = bool(request.form.get("include_history"))
         deleted, kept = [], []

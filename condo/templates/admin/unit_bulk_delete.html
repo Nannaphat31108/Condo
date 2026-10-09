@@ -1,14 +1,15 @@
 {% extends "base.html" %}
 {% from "_macros.html" import csrf %}
 {% block content %}
-<h1>ลบห้องหลายห้อง</h1>
+<h1>รีเซ็ต / ลบห้องหลายห้อง</h1>
+<p class="muted">เลือกช่วงเลขห้อง แล้วเลือกว่าจะ <b>รีเซ็ตข้อมูล</b> (เก็บห้องไว้ ล้างบิล ใบเสร็จ เลขมิเตอร์ เพื่อใส่ข้อมูลจริงใหม่) หรือ <b>ลบห้องทิ้ง</b></p>
 <div class="card">
   <form method="get" class="filters">
-    <div class="field"><label>เลขห้องตั้งแต่</label><input type="text" name="from" value="{{ first }}" placeholder="เช่น 101" required></div>
-    <div class="field"><label>ถึง</label><input type="text" name="to" value="{{ last }}" placeholder="เช่น 825" required></div>
+    <div class="field"><label>เลขห้องตั้งแต่</label><input type="text" name="from" value="{{ first }}" placeholder="เช่น 26/1" required></div>
+    <div class="field"><label>ถึง</label><input type="text" name="to" value="{{ last }}" placeholder="เช่น 26/2" required></div>
     <button class="btn">แสดงรายการ</button>
   </form>
-  <p class="help">เรียงเลขห้องแบบตัวเลข เช่น 101 ถึง 825 จะได้ 101, 102 … 825 (ไม่รวมห้องแบบ 26/1)</p>
+  <p class="help">เรียงเลขห้องแบบตัวเลข เช่น 26/1 ถึง 26/2 จะได้ 26/1, 26/2 · 101 ถึง 825 จะได้ 101 … 825 (ไม่รวมห้องแบบ 26/…) · ห้องเดียวให้ใส่เลขเดียวกันทั้งสองช่อง</p>
 </div>
 {% if first and last %}
 <div class="card">
@@ -17,14 +18,24 @@
     <h2>พบ {{ units|length }} ห้อง: {{ units[0].unit_no }} … {{ units[-1].unit_no }}</h2>
     {% if with_bills %}<div class="flash error">มี {{ with_bills|length }} ห้องที่มีใบแจ้งหนี้แล้ว: {{ with_bills|map(attribute='unit_no')|join(', ') }}</div>{% endif %}
     <div class="checklist" style="margin-bottom:1rem">{% for u in units %}<span>{{ u.unit_no }}{% if u.invoice_count %} <span class="badge unpaid">มีบิล</span>{% endif %}</span>{% endfor %}</div>
-    <form method="post" data-confirm="ยืนยันลบ {{ units|length }} ห้อง ({{ units[0].unit_no }} ถึง {{ units[-1].unit_no }}) ? ลบแล้วกู้คืนไม่ได้">
+    <div class="grid grid-2">
+    <form method="post" class="card" style="margin:0" data-confirm="ยืนยันรีเซ็ตข้อมูล {{ units|length }} ห้อง ({{ units[0].unit_no }} ถึง {{ units[-1].unit_no }}) ? บิล ใบเสร็จ และเลขมิเตอร์ของห้องเหล่านี้จะถูกลบ กู้คืนไม่ได้">
+      {{ csrf() }}<input type="hidden" name="from" value="{{ first }}"><input type="hidden" name="to" value="{{ last }}"><input type="hidden" name="action" value="reset">
+      <h3>รีเซ็ตข้อมูล (เก็บห้องไว้)</h3>
+      <p class="small">ลบใบแจ้งหนี้ ใบเสร็จ เลขมิเตอร์ เบี้ยปรับ และรายการเพิ่มเติมทั้งหมดของห้องเหล่านี้ เพื่อเริ่มใส่ข้อมูลจริงใหม่</p>
+      <div class="field"><label class="check"><input type="checkbox" name="clear_contacts" value="1"> ล้างชื่อเจ้าของ / ผู้เช่า / เบอร์โทรด้วย</label></div>
+      <button class="btn btn-primary">รีเซ็ตข้อมูล {{ units|length }} ห้อง</button>
+    </form>
+    <form method="post" class="card" style="margin:0" data-confirm="ยืนยันลบ {{ units|length }} ห้อง ({{ units[0].unit_no }} ถึง {{ units[-1].unit_no }}) ? ลบแล้วกู้คืนไม่ได้">
       {{ csrf() }}<input type="hidden" name="from" value="{{ first }}"><input type="hidden" name="to" value="{{ last }}">
+      <h3>ลบห้องทิ้ง</h3>
       {% if with_bills %}
       <div class="field"><label class="check"><input type="checkbox" name="include_history" value="1"> ลบประวัติบิลและการรับชำระของห้องเหล่านี้ด้วย (ใช้กับข้อมูลทดลองเท่านั้น)</label></div>
       {% endif %}
       <button class="btn btn-danger">ลบ {{ units|length }} ห้อง</button>
-      <a class="btn" href="{{ url_for('admin.units') }}">ยกเลิก</a>
     </form>
+    </div>
+    <p style="margin-top:1rem"><a class="btn" href="{{ url_for('admin.units') }}">ยกเลิก</a></p>
   {% else %}
     <p class="muted">ไม่พบห้องในช่วงนี้</p>
   {% endif %}

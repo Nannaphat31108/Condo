@@ -6,6 +6,8 @@
   <div class="actions">
     <a class="btn" href="{{ url_for('admin.unit_form', unit_id=unit.id) }}">แก้ไขข้อมูล</a>
     <a class="btn" href="{{ url_for('admin.user_form', unit_id=unit.id) }}">+ สร้างบัญชีลูกบ้าน</a>
+    <form method="post" action="{{ url_for('admin.unit_reset', unit_id=unit.id) }}" class="inline" data-confirm="ยืนยันรีเซ็ตข้อมูลห้อง {{ unit.unit_no }} ? บิล ใบเสร็จ เลขมิเตอร์ และรายการเพิ่มเติมทั้งหมดของห้องนี้จะถูกลบ (เก็บห้องไว้)">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="btn btn-danger">รีเซ็ตข้อมูลห้องนี้</button></form>
     {% if not invoices %}{{ post_button(url_for('admin.unit_delete', unit_id=unit.id), 'ลบห้อง', 'ยืนยันลบห้อง ' ~ unit.unit_no ~ ' ?', 'btn btn-danger') }}{% endif %}
   </div>
 </div>

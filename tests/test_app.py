@@ -193,7 +193,8 @@ def test_full_billing_flow(app, client):
         invs = db.execute("SELECT * FROM invoices").fetchall()
         assert [i["unit_no"] for i in invs] == ["101"]
         # น้ำ 10×16=160, ไฟ 100×8=800, ส่วนกลาง 250, ขยะ 20, ประกัน 10, ค่าซ่อม 250
-        assert invs[0]["total"] == 160 + 800 + 250 + 20 + 10 + 250
+        # + ค่ารักษามิเตอร์ 25
+        assert invs[0]["total"] == 160 + 800 + 250 + 20 + 10 + 250 + 25
         assert invs[0]["invoice_no"] == "0001/09/2026"
         water = db.execute("SELECT * FROM invoice_items WHERE invoice_id=? AND description='ค่าน้ำประปา'",
                            (invs[0]["id"],)).fetchone()
@@ -207,14 +208,14 @@ def test_full_billing_flow(app, client):
         db = get_db()
         inv102 = db.execute("SELECT * FROM invoices WHERE unit_no='102'").fetchone()
         # น้ำ 2 หน่วย เหมาจ่าย 65, ไฟ 400, ส่วนกลาง 250, ขยะ 20, ประกัน 10, ที่จอดรถ 500
-        assert inv102["total"] == 65 + 400 + 250 + 20 + 10 + 500
+        assert inv102["total"] == 65 + 400 + 250 + 20 + 10 + 500 + 25
         assert inv102["invoice_no"] == "0002/09/2026"
         assert db.execute("SELECT COUNT(*) FROM invoices").fetchone()[0] == 2
         inv101 = db.execute("SELECT * FROM invoices WHERE unit_no='101'").fetchone()
 
     # รับชำระบางส่วน แล้วครบ
     s.post(f"/admin/invoices/{inv101['id']}/pay", {"amount": "300", "paid_at": "2026-09-05"})
-    s.post(f"/admin/invoices/{inv101['id']}/pay", {"amount": "1190", "paid_at": "2026-10-06"})
+    s.post(f"/admin/invoices/{inv101['id']}/pay", {"amount": "1215", "paid_at": "2026-10-06"})
     with app.app_context():
         db = get_db()
         assert db.execute("SELECT status FROM invoices WHERE id=?", (inv101["id"],)).fetchone()[0] == "paid"
@@ -320,16 +321,16 @@ def test_generate_rooms_bulk_payment_and_receipt_print(app, client):
     with app.app_context():
         db = get_db()
         invs = db.execute("SELECT * FROM invoices ORDER BY unit_no").fetchall()
-        assert len(invs) == 198 and invs[0]["total"] == 280
+        assert len(invs) == 198 and invs[0]["total"] == 305
         assert invs[-1]["invoice_no"] == "0198/10/2026"
 
     form = {"period": "2026-10", "paid_at": "2026-10-05", "method": "เงินสด"}
     for inv in invs[:3]:
         form[f"pay_{inv['id']}"] = "1"
-        form[f"amount_{inv['id']}"] = "280"
+        form[f"amount_{inv['id']}"] = "305"
     form[f"pay_{invs[3]['id']}"] = "1"
     form[f"amount_{invs[3]['id']}"] = "100"   # ชำระบางส่วน
-    form[f"amount_{invs[4]['id']}"] = "280"   # ไม่ได้ติ๊ก -> ไม่บันทึก
+    form[f"amount_{invs[4]['id']}"] = "305"   # ไม่ได้ติ๊ก -> ไม่บันทึก
     s.post("/admin/payments/bulk", form)
     with app.app_context():
         db = get_db()
@@ -480,7 +481,7 @@ def test_shop_charges_and_all_in_one_sheet(app, client):
         db = get_db()
         inv = {r["unit_no"]: r for r in db.execute("SELECT * FROM invoices")}
         # ห้อง: น้ำ 3 หน่วย เหมาจ่าย 65 + ส่วนกลาง 250 + ขยะ 20 + ประกัน 10 + เบี้ยปรับค่าน้ำ 40 + ค่าซ่อม 150
-        assert inv["26/1"]["total"] == 65 + 250 + 20 + 10 + 40 + 150
+        assert inv["26/1"]["total"] == 65 + 25 + 250 + 20 + 10 + 40 + 150
         pen = db.execute("SELECT kind FROM invoice_items WHERE invoice_id=? AND description='เบี้ยปรับค่าน้ำ'",
                          (inv["26/1"]["id"],)).fetchone()
         assert pen["kind"] == "penalty"
@@ -494,7 +495,7 @@ def test_shop_charges_and_all_in_one_sheet(app, client):
     form.update({f"pen_0_{room}": "100", f"pen_1_{room}": "40"})
     s.post("/admin/sheet", form)
     with app.app_context():
-        assert get_db().execute("SELECT total FROM invoices WHERE unit_no='26/1'").fetchone()[0] == 535 + 100
+        assert get_db().execute("SELECT total FROM invoices WHERE unit_no='26/1'").fetchone()[0] == 560 + 100
     page = client.get(f"/admin/invoices/{inv['ร้าน 1']['id']}").get_data(as_text=True)
     assert "ร้านค้า" in page and "ค่ารักษามิเตอร์" in page
 
@@ -576,8 +577,8 @@ def test_sheet_untick_items_per_room(app, client):
     with app.app_context():
         db = get_db()
         inv = {r["unit_no"]: r for r in db.execute("SELECT * FROM invoices")}
-        assert inv["26/1"]["total"] == 250 + 20 + 10          # ไม่มีค่าน้ำ
-        assert inv["26/2"]["total"] == 250 + 160 + 10         # น้ำ 10 หน่วย × 16, ไม่มีค่าขยะ
+        assert inv["26/1"]["total"] == 250 + 20 + 10 + 25     # ไม่มีค่าน้ำ
+        assert inv["26/2"]["total"] == 250 + 160 + 10 + 25    # น้ำ 10 หน่วย × 16, ไม่มีค่าขยะ
         names = [r[0] for r in db.execute("SELECT description FROM invoice_items WHERE invoice_id=?", (inv["26/1"]["id"],))]
         assert "ค่าน้ำประปา" not in names
     # หลังออกบิล: ห้อง 26/2 ค้างแค่ค่าน้ำ -> เอาติ๊กส่วนกลาง/ประกันออก, ติ๊กค่าขยะกลับ
@@ -590,10 +591,10 @@ def test_sheet_untick_items_per_room(app, client):
     with app.app_context():
         db = get_db()
         row = db.execute("SELECT * FROM invoices WHERE unit_no='26/2'").fetchone()
-        assert row["total"] == 160 + 20
+        assert row["total"] == 160 + 25 + 20
         order = [r[0] for r in db.execute("SELECT description FROM invoice_items WHERE invoice_id=? ORDER BY sort_order",
                                           (row["id"],))]
-        assert order == ["ค่าน้ำประปา", "ค่าขยะ"]
+        assert order == ["ค่าน้ำประปา", "ค่ารักษามิเตอร์", "ค่าขยะ"]
     # จ่ายแล้วบางส่วน: เอาออกจนยอดน้อยกว่าที่จ่าย -> ไม่ยอม
     s.post(f"/admin/invoices/{row['id']}/pay", {"amount": "170", "paid_at": "2026-10-05"})
     form = sheet_form(client, "/admin/sheet?period=2026-10&type=room")
@@ -601,4 +602,55 @@ def test_sheet_untick_items_per_room(app, client):
     r = s.post("/admin/sheet", form, follow_redirects=True)
     assert "น้อยกว่าที่ชำระแล้ว" in r.get_data(as_text=True)
     with app.app_context():
-        assert get_db().execute("SELECT total FROM invoices WHERE id=?", (row["id"],)).fetchone()[0] == 180
+        assert get_db().execute("SELECT total FROM invoices WHERE id=?", (row["id"],)).fetchone()[0] == 205
+
+
+def test_meter_fee_for_rooms_and_reset_room(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    for no in ("26/1", "26/2", "26/3"):
+        s.post("/admin/units/new", {"unit_no": no, "unit_type": "room", "owner_name": "ทดลอง", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        fee = db.execute("SELECT * FROM charge_types WHERE name='ค่ารักษามิเตอร์'").fetchone()
+        assert fee["unit_type"] == "all" and fee["rate"] == 25
+        ids = {r["unit_no"]: r["id"] for r in db.execute("SELECT * FROM units")}
+        water = db.execute("SELECT id FROM charge_types WHERE name='ค่าน้ำประปา'").fetchone()[0]
+    form = sheet_form(client, "/admin/sheet?period=2026-10&type=room")
+    for no in ids:
+        form.update({f"prev_{water}_{ids[no]}": "0", f"curr_{water}_{ids[no]}": "2"})
+    form.update({f"pen_0_{ids['26/1']}": "50", "action": "bill"})
+    s.post("/admin/sheet", form)
+    with app.app_context():
+        db = get_db()
+        inv1 = db.execute("SELECT * FROM invoices WHERE unit_no='26/1'").fetchone()
+        assert inv1["total"] == 250 + 65 + 25 + 20 + 10 + 50
+    s.post(f"/admin/invoices/{inv1['id']}/pay", {"amount": "100", "paid_at": "2026-10-05"})
+    # รีเซ็ต 26/1 ถึง 26/2 (เก็บห้องไว้ ล้างชื่อด้วย) -> 26/3 ไม่โดน
+    page = client.get("/admin/units/bulk-delete?from=26/1&to=26/2").get_data(as_text=True)
+    assert "พบ 2 ห้อง" in page
+    s.post("/admin/units/bulk-delete", {"from": "26/1", "to": "26/2", "action": "reset", "clear_contacts": "1"})
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT COUNT(*) FROM units").fetchone()[0] == 3
+        for no in ("26/1", "26/2"):
+            uid = ids[no]
+            for table in ("invoices", "meter_readings", "adhoc_charges"):
+                assert db.execute(f"SELECT COUNT(*) FROM {table} WHERE unit_id=?", (uid,)).fetchone()[0] == 0, table
+            assert db.execute("SELECT owner_name FROM units WHERE id=?", (uid,)).fetchone()[0] == ""
+        assert db.execute("SELECT COUNT(*) FROM payments").fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM invoices WHERE unit_id=?", (ids["26/3"],)).fetchone()[0] == 1
+        assert db.execute("SELECT owner_name FROM units WHERE id=?", (ids["26/3"],)).fetchone()[0] == "ทดลอง"
+    # รีเซ็ตทีละห้องจากหน้าห้อง
+    s.post(f"/admin/units/{ids['26/3']}/reset", {})
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM invoices").fetchone()[0] == 0
+    # ออกบิลใหม่ เลขที่เริ่ม 0001 ใหม่
+    form = sheet_form(client, "/admin/sheet?period=2026-10&type=room")
+    for no in ids:
+        form.update({f"prev_{water}_{ids[no]}": "0", f"curr_{water}_{ids[no]}": "5"})
+    form["action"] = "bill"
+    s.post("/admin/sheet", form)
+    with app.app_context():
+        nos = sorted(r[0] for r in get_db().execute("SELECT invoice_no FROM invoices"))
+        assert nos == ["0001/10/2026", "0002/10/2026", "0003/10/2026"]

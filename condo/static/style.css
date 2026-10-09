@@ -171,7 +171,6 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
   border: 1px solid var(--line); border-radius: 14px; font-size: 14px;
   box-shadow: 0 1px 3px rgba(16,40,70,.06);
 }
-.bill::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 7px; background: linear-gradient(90deg, var(--b-main), var(--b-accent)); }
 .bill--receipt { --b-main: #17707f; --b-accent: #3fb3a3; --b-soft: #e8f6f3; --b-line: #c6e3dd; }
 .bill-watermark { position: absolute; width: 62%; left: 19%; top: 34%; opacity: .045; pointer-events: none; }
 .bill > *:not(.bill-watermark) { position: relative; }
@@ -180,7 +179,7 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 .bill-logo { width: 92px; height: auto; flex-shrink: 0; }
 .bill-org { flex: 1; font-size: .86em; line-height: 1.5; color: #44515e; }
 .bill-org-name { font-size: 1.32em; font-weight: 700; color: var(--b-main); line-height: 1.3; margin-bottom: .1rem; }
-.bill-title { text-align: center; background: var(--b-main); color: #fff; border-radius: 10px; padding: .45rem 1.2rem; white-space: nowrap; }
+.bill-title { text-align: right; color: var(--b-main); padding: 0; white-space: nowrap; }
 .bill-title-th { font-size: 1.45em; font-weight: 700; line-height: 1.25; }
 .bill-title-en { font-size: .72em; letter-spacing: .3em; opacity: .85; }
 
@@ -201,7 +200,7 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 .bill-stamp.void { border-color: #c0352b; color: #c0352b; }
 
 .bill-items { width: 100%; border-collapse: separate; border-spacing: 0; border: 1px solid var(--b-line); border-radius: 10px; overflow: hidden; }
-.bill-items th { background: var(--b-main); color: #fff; font-weight: 600; font-size: .85em; padding: .5rem .6rem; border: 0; }
+.bill-items th { background: transparent; color: var(--b-ink); font-weight: 700; font-size: .85em; padding: .5rem .6rem; border: 0; border-bottom: 1.5px solid var(--b-main); }
 .bill-items td { padding: .45rem .6rem; border: 0; border-bottom: 1px solid #e6eef3; vertical-align: top; }
 .bill-items tbody tr:nth-child(even) td { background: #f7fbfd; }
 .bill-items tr:hover td { background: inherit; }
@@ -219,9 +218,9 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 .bill-total-words { border: 1px dashed var(--b-line); border-radius: 10px; padding: .5rem .9rem; background: #fff; }
 .bill-total-words .label, .bill-total-amount .label { font-size: .8em; color: #5b6a77; }
 .bill-total-words .words { font-size: 1.12em; font-weight: 700; color: var(--b-main); }
-.bill-total-amount { background: linear-gradient(135deg, var(--b-main), var(--b-accent)); color: #fff; border-radius: 10px; padding: .5rem 1.2rem; text-align: right; min-width: 210px; }
-.bill-total-amount .label { color: rgba(255,255,255,.85); }
-.bill-total-amount .amount { font-size: 1.75em; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.bill-total-amount { color: var(--b-ink); padding: .5rem .2rem .5rem 1.2rem; text-align: right; min-width: 210px; }
+.bill-total-amount .label { color: #5b6a77; }
+.bill-total-amount .amount { color: var(--b-main); font-size: 1.75em; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
 .bill-total-amount .cur { font-size: .8em; opacity: .85; }
 
 .bill-pay { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .9rem; margin-top: .8rem; font-size: .92em; }
@@ -230,7 +229,7 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 .bill-pay .box.on { font-weight: 700; color: var(--b-main); }
 .bill-pay .box.on::before { background: var(--b-main); border-color: var(--b-main); box-shadow: inset 0 0 0 2px #fff; }
 .bill-pay .ref { color: #52606d; }
-.invoice-pay { display: grid; gap: .2rem; background: var(--b-soft); border-radius: 10px; padding: .55rem .9rem; }
+.invoice-pay { display: grid; gap: .2rem; }
 .bill-note-line { font-size: .88em; color: #52606d; margin-top: .4rem; }
 
 .bill-signs { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 2.6rem; text-align: center; font-size: .9em; }
@@ -246,7 +245,6 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 .layout-half .bill .bill-items th, .layout-half .bill .bill-items td { padding: .22rem .5rem; }
 .layout-half .bill .bill-total { margin-top: .5rem; }
 .layout-half .bill .bill-signs { margin-top: 1.1rem; }
-.layout-half .bill .bill-title { padding: .3rem .9rem; }
 .layout-half .bill .bill-total-amount .amount { font-size: 1.5em; }
 .layout-half .bill .bill-pay { margin-top: .45rem; }
 .layout-half .bill .bill-foot { margin-top: .5rem; padding-top: .3rem; }
@@ -254,7 +252,7 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 @media screen and (max-width: 700px) {
   .bill { padding: 1.2rem 1rem 1rem; font-size: 13px; }
   .bill-head { flex-wrap: wrap; }
-  .bill-title { order: -1; width: 100%; }
+  .bill-title { order: -1; width: 100%; text-align: left; }
   .bill-meta { grid-template-columns: 1fr; }
   .bill-ref { border-left: 0; padding-left: 0; }
   .bill-total { grid-template-columns: 1fr; }
@@ -267,7 +265,6 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 }
 @media print {
   .bill { border: 0; border-radius: 0; box-shadow: none; max-width: none; margin: 0; padding: 0 0 .5rem; }
-  .bill::before { display: none; }
   .layout-full .sheet-slot { break-after: page; page-break-after: always; }
   .layout-half .sheet-slot { height: 132mm; overflow: hidden; border-bottom: 1px dashed #999; margin-bottom: 4mm; }
   .layout-half .sheet-slot:nth-of-type(2n) { break-after: page; page-break-after: always; border-bottom: 0; }
@@ -316,13 +313,13 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 /* ขาวดำ ประหยัดหมึก: ใบเสร็จทุกใบ และใบแจ้งหนี้เมื่อเลือกโหมดประหยัดหมึก
    ไม่มีพื้นหลังสี ลายน้ำ หรือตัวอักษรสี เหลือเฉพาะเส้นและตัวหนังสือสีดำ */
 .bill--mono { --b-main: #000; --b-accent: #000; --b-soft: #fff; --b-line: #000; --b-ink: #000; color: #000; box-shadow: none; }
-.bill--mono::before, .bill--mono .bill-watermark { display: none; }
+.bill--mono .bill-watermark { display: none; }
 .bill--mono .bill-logo { filter: grayscale(1) contrast(1.2); }
 .bill--mono .bill-head { border-bottom-width: 1.5px; }
 .bill--mono .bill-org, .bill--mono dt, .bill--mono .bill-room .label, .bill--mono .bill-total-words .label,
 .bill--mono .bill-items .item-meter, .bill--mono .bill-items .unit, .bill--mono .bill-note-line,
 .bill--mono .bill-signs .role, .bill--mono .bill-foot, .bill--mono .bill-pay .ref, .bill--mono .muted { color: #000; }
-.bill--mono .bill-title { background: #fff; color: #000; border: 1.5px solid #000; }
+.bill--mono .bill-title { color: #000; }
 .bill--mono .bill-room { background: #fff; border-color: #000; }
 .bill--mono .bill-items { border-color: #000; }
 .bill--mono .bill-items th { background: #fff; color: #000; border-bottom: 1.5px solid #000; }
@@ -331,9 +328,8 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 .bill--mono .bill-items tr.is-penalty .item-name, .bill--mono dd.due { color: #000; }
 .bill--mono .bill-items .flat { background: #fff; border: 1px solid #000; color: #000; }
 .bill--mono .bill-total-words { border: 1px solid #000; }
-.bill--mono .bill-total-amount { background: #fff; color: #000; border: 1.5px solid #000; }
+.bill--mono .bill-total-amount, .bill--mono .bill-total-amount .amount { color: #000; }
 .bill--mono .bill-total-amount .label { color: #000; }
-.bill--mono .invoice-pay { background: #fff; border: 1px solid #000; }
 .bill--mono .bill-pay .box::before { border-color: #000; }
 .bill--mono .bill-pay .box.on { color: #000; }
 .bill--mono .bill-pay .box.on::before { background: #000; border-color: #000; }
