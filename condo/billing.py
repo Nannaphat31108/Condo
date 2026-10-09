@@ -10,6 +10,7 @@ METHOD_LABELS = {
     "per_area": "ตามพื้นที่ห้อง (ต่อ ตร.ม.)",
 }
 METER_METHODS = ("meter_rate", "meter_tiered")
+FLAT_RATE_LABEL = "เหมาจ่าย"  # ใช้น้อยกว่าค่าขั้นต่ำ
 FREQUENCY_LABELS = {"monthly": "ทุกเดือน", "yearly": "ปีละครั้ง", "once": "ครั้งเดียว"}
 STATUS_LABELS = {"unpaid": "ค้างชำระ", "partial": "ชำระบางส่วน", "paid": "ชำระแล้ว", "void": "ยกเลิก"}
 THAI_MONTHS = ["", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
@@ -137,7 +138,7 @@ def compute_item(ct, unit, reading=None, override=None):
         amount = float(override)
         detail_parts.append("ยอดเฉพาะห้อง")
     elif min_charge and amount < min_charge:
-        detail_parts.append(f"คิดขั้นต่ำ {fmt_num(min_charge)}")
+        detail_parts.append(f"{FLAT_RATE_LABEL} {fmt_num(min_charge)}")
         amount = min_charge
 
     amount = money(amount)
@@ -269,9 +270,10 @@ def generate_invoices(db, period, settings, unit_ids=None):
         vat = money(sum(i["vat_amount"] for i in items))
         invoice_no = next_number(db, "invoices", "invoice_no", period)
         cur = db.execute(
-            "INSERT INTO invoices (invoice_no, unit_id, unit_no, owner_name, period, issue_date, due_date,"
-            " subtotal, vat, total, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (invoice_no, unit["id"], unit["unit_no"], unit["owner_name"], period, issue_date, due_date,
+            "INSERT INTO invoices (invoice_no, unit_id, unit_no, owner_name, tenant_name, period, issue_date, due_date,"
+            " subtotal, vat, total, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (invoice_no, unit["id"], unit["unit_no"], unit["owner_name"], unit["tenant_name"] or "", period,
+             issue_date, due_date,
              subtotal, vat, money(subtotal + vat), settings.get("invoice_note", "")),
         )
         invoice_id = cur.lastrowid

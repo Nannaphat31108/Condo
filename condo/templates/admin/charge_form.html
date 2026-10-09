@@ -36,7 +36,7 @@
 
       <div class="form-row">
         <div class="field" data-show="meter_rate meter_tiered per_area"><label>ค่าบริการบวกเพิ่ม (บาท)</label><input type="number" step="0.01" name="fixed_fee" value="{{ ct.fixed_fee if ct else 0 }}"><div class="help">เช่น ค่ารักษามิเตอร์</div></div>
-        <div class="field" data-show="meter_rate meter_tiered per_area"><label>ค่าขั้นต่ำ (บาท)</label><input type="number" step="0.01" name="min_charge" value="{{ ct.min_charge if ct else 0 }}"><div class="help">ถ้าคำนวณได้น้อยกว่านี้ จะคิดเท่ากับค่าขั้นต่ำ</div></div>
+        <div class="field" data-show="meter_rate meter_tiered per_area"><label>ค่าขั้นต่ำ (บาท)</label><input type="number" step="0.01" name="min_charge" value="{{ ct.min_charge if ct else 0 }}"><div class="help">ถ้าคำนวณได้น้อยกว่านี้ จะคิดเหมาจ่ายเท่ากับค่านี้ เช่น ค่าน้ำ 16 บาท/หน่วย ขั้นต่ำ 65 = ใช้ 1-4 หน่วยจ่าย 65 บาท</div></div>
         <div class="field"><label>VAT (%)</label><input type="number" step="0.01" name="vat_percent" value="{{ ct.vat_percent if ct else 0 }}"></div>
       </div>
 

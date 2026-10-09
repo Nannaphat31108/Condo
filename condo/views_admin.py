@@ -74,7 +74,7 @@ def dashboard():
 
 
 # ---------------------------------------------------------------- units
-UNIT_FIELDS = ("unit_no", "building", "floor", "area_sqm", "owner_name", "phone", "email", "note")
+UNIT_FIELDS = ("unit_no", "building", "floor", "area_sqm", "owner_name", "phone", "tenant_name", "tenant_phone", "note")
 
 
 def unit_form_data():
@@ -93,8 +93,9 @@ def units():
            " (SELECT GROUP_CONCAT(username, ', ') FROM users WHERE unit_id=u.id) AS usernames FROM units u")
     params = []
     if q:
-        sql += " WHERE u.unit_no LIKE ? OR u.owner_name LIKE ? OR u.phone LIKE ?"
-        params = [f"%{q}%"] * 3
+        sql += (" WHERE u.unit_no LIKE ? OR u.owner_name LIKE ? OR u.phone LIKE ?"
+                " OR u.tenant_name LIKE ? OR u.tenant_phone LIKE ?")
+        params = [f"%{q}%"] * 5
     rows = get_db().execute(sql + " ORDER BY u.active DESC, u.unit_no", params).fetchall()
     return render_template("admin/units.html", units=rows, q=q)
 
@@ -114,14 +115,14 @@ def unit_form(unit_id=None):
                 if unit:
                     db.execute(
                         "UPDATE units SET unit_no=?, building=?, floor=?, area_sqm=?, owner_name=?, phone=?,"
-                        " email=?, note=?, active=? WHERE id=?",
+                        " tenant_name=?, tenant_phone=?, note=?, active=? WHERE id=?",
                         (*[data[f] for f in UNIT_FIELDS], data["active"], unit_id),
                     )
                     log_activity(g.user, f"แก้ไขห้อง {data['unit_no']}")
                 else:
                     db.execute(
-                        "INSERT INTO units (unit_no, building, floor, area_sqm, owner_name, phone, email, note, active)"
-                        " VALUES (?,?,?,?,?,?,?,?,?)",
+                        "INSERT INTO units (unit_no, building, floor, area_sqm, owner_name, phone, tenant_name,"
+                        " tenant_phone, note, active) VALUES (?,?,?,?,?,?,?,?,?,?)",
                         (*[data[f] for f in UNIT_FIELDS], data["active"]),
                     )
                     log_activity(g.user, f"เพิ่มห้อง {data['unit_no']}")
@@ -137,7 +138,8 @@ def unit_form(unit_id=None):
 @bp.route("/units/import", methods=("GET", "POST"))
 @admin_required
 def unit_import():
-    """นำเข้าห้องจำนวนมาก: สร้างตามชั้น/จำนวนห้อง หรือจากข้อความ CSV เลขห้อง,อาคาร,ชั้น,พื้นที่,ชื่อเจ้าของ,โทร"""
+    """นำเข้าห้องจำนวนมาก: สร้างตามชั้น/จำนวนห้อง หรือจาก CSV
+    เลขห้อง,อาคาร,ชั้น,พื้นที่,ชื่อเจ้าของ,โทรเจ้าของ,ชื่อผู้เช่า,โทรผู้เช่า"""
     if request.method == "POST":
         db = get_db()
         added, skipped = 0, []
@@ -171,13 +173,14 @@ def unit_import():
         if upload and upload.filename:
             text = upload.read().decode("utf-8-sig", errors="replace")
         for row in csv.reader(io.StringIO(text)):
-            row = [c.strip() for c in row] + [""] * 6
+            row = [c.strip() for c in row] + [""] * 8
             if not row[0] or row[0] in ("unit_no", "เลขห้อง"):
                 continue
             try:
                 db.execute(
-                    "INSERT INTO units (unit_no, building, floor, area_sqm, owner_name, phone) VALUES (?,?,?,?,?,?)",
-                    (row[0], row[1], row[2], to_float(row[3]), row[4], row[5]),
+                    "INSERT INTO units (unit_no, building, floor, area_sqm, owner_name, phone, tenant_name, tenant_phone)"
+                    " VALUES (?,?,?,?,?,?,?,?)",
+                    (row[0], row[1], row[2], to_float(row[3]), row[4], row[5], row[6], row[7]),
                 )
                 added += 1
             except sqlite3.IntegrityError:
@@ -236,7 +239,8 @@ def users():
 def user_form(user_id=None):
     db = get_db()
     user = get_or_404("SELECT * FROM users WHERE id=?", (user_id,)) if user_id else None
-    units_list = db.execute("SELECT id, unit_no, owner_name FROM units WHERE active=1 ORDER BY unit_no").fetchall()
+    units_list = db.execute("SELECT id, unit_no, owner_name, tenant_name FROM units WHERE active=1"
+                            " ORDER BY unit_no").fetchall()
     if request.method == "POST":
         data = {
             "username": request.form.get("username", "").strip(),
@@ -603,8 +607,8 @@ def invoices():
         sql += " AND period=?"
         params.append(period)
     if q:
-        sql += " AND (unit_no LIKE ? OR owner_name LIKE ? OR invoice_no LIKE ?)"
-        params += [f"%{q}%"] * 3
+        sql += " AND (unit_no LIKE ? OR owner_name LIKE ? OR tenant_name LIKE ? OR invoice_no LIKE ?)"
+        params += [f"%{q}%"] * 4
     rows = db.execute(sql + " ORDER BY period DESC, unit_no LIMIT 1000", params).fetchall()
     totals = {
         "total": sum(r["total"] for r in rows if r["status"] != "void"),
@@ -921,9 +925,9 @@ def export_invoices():
     rows = db.execute(sql + " ORDER BY period, unit_no", params).fetchall()
     return csv_response(
         f"invoices{('-' + year) if year else ''}.csv",
-        ["เลขที่", "งวด", "ห้อง", "เจ้าของ", "วันที่ออก", "ครบกำหนด", "ก่อนภาษี", "VAT", "ยอดรวม", "ชำระแล้ว",
+        ["เลขที่", "งวด", "ห้อง", "เจ้าของ", "ผู้เช่า", "วันที่ออก", "ครบกำหนด", "ก่อนภาษี", "VAT", "ยอดรวม", "ชำระแล้ว",
          "คงค้าง", "สถานะ"],
-        [[r["invoice_no"], r["period"], r["unit_no"], r["owner_name"], r["issue_date"], r["due_date"],
+        [[r["invoice_no"], r["period"], r["unit_no"], r["owner_name"], r["tenant_name"], r["issue_date"], r["due_date"],
           r["subtotal"], r["vat"], r["total"], r["paid_amount"], round(r["total"] - r["paid_amount"], 2),
           billing.STATUS_LABELS[r["status"]]] for r in rows],
     )

@@ -31,9 +31,10 @@
       <div class="value">{{ inv.unit_no }}</div>
     </div>
     <dl class="bill-party">
-      <div><dt>{{ 'ได้รับเงินจาก' if is_receipt else 'ชื่อเจ้าของห้องชุด' }}</dt><dd>{{ inv.owner_name or '—' }}</dd></div>
+      <div><dt>เจ้าของห้องชุด</dt><dd>{{ inv.owner_name or '—' }}</dd></div>
+      {% if inv.tenant_name %}<div><dt>ผู้เช่า</dt><dd>{{ inv.tenant_name }}</dd></div>{% endif %}
       <div><dt>ประจำเดือน</dt><dd>{{ inv.period|period }}</dd></div>
-      {% if unit and (unit.building or unit.floor) %}<div><dt>อาคาร / ชั้น</dt><dd>{{ unit.building or '—' }} / {{ unit.floor or '—' }}</dd></div>{% endif %}
+      {% if not inv.tenant_name and unit and (unit.building or unit.floor) %}<div><dt>อาคาร / ชั้น</dt><dd>{{ unit.building or '—' }} / {{ unit.floor or '—' }}</dd></div>{% endif %}
     </dl>
     <dl class="bill-ref">
       <div><dt>เลขที่</dt><dd class="strong">{{ p.receipt_no if is_receipt else inv.invoice_no }}</dd></div>
@@ -69,7 +70,7 @@
         </td>
         {% if it.meter_curr is not none %}
           <td class="num">{{ it.quantity|num }} <span class="unit">{{ it.unit_label }}</span></td>
-          <td class="num">{{ it.unit_price|baht }}</td>
+          <td class="num">{% if 'เหมาจ่าย' in (it.detail or '') %}<span class="flat">เหมาจ่าย</span>{% else %}{{ it.unit_price|baht }}{% endif %}</td>
         {% else %}
           <td class="num muted">—</td><td class="num muted">—</td>
         {% endif %}

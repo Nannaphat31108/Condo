@@ -18,6 +18,13 @@ def reading(prev, curr):
     return {"prev_reading": prev, "curr_reading": curr}
 
 
+def test_water_flat_rate_then_per_unit():
+    water = ct(method="meter_rate", rate=16, min_charge=65)
+    amounts = {u: billing.compute_item(water, {}, reading(100, 100 + u))["amount"] for u in (0, 1, 4, 5, 10)}
+    assert amounts == {0: 65, 1: 65, 4: 65, 5: 80, 10: 160}
+    assert "เหมาจ่าย" in billing.compute_item(water, {}, reading(0, 3))["detail"]
+
+
 def test_meter_rate_with_min_charge():
     water = ct(method="meter_rate", rate=18, min_charge=100)
     assert billing.compute_item(water, {}, reading(100, 110))["amount"] == 180
@@ -138,8 +145,8 @@ def test_full_billing_flow(app, client):
         db = get_db()
         invs = db.execute("SELECT * FROM invoices").fetchall()
         assert [i["unit_no"] for i in invs] == ["101"]
-        # น้ำ 10×18=180, ไฟ 100×8=800, ส่วนกลาง 250, ขยะ 20, ประกัน 10, ค่าซ่อม 250
-        assert invs[0]["total"] == 180 + 800 + 250 + 20 + 10 + 250
+        # น้ำ 10×16=160, ไฟ 100×8=800, ส่วนกลาง 250, ขยะ 20, ประกัน 10, ค่าซ่อม 250
+        assert invs[0]["total"] == 160 + 800 + 250 + 20 + 10 + 250
         assert invs[0]["invoice_no"] == "0001/09/2026"
         water = db.execute("SELECT * FROM invoice_items WHERE invoice_id=? AND description='ค่าน้ำประปา'",
                            (invs[0]["id"],)).fetchone()
@@ -152,15 +159,15 @@ def test_full_billing_flow(app, client):
     with app.app_context():
         db = get_db()
         inv102 = db.execute("SELECT * FROM invoices WHERE unit_no='102'").fetchone()
-        # น้ำขั้นต่ำ 100, ไฟ 400, ส่วนกลาง 250, ขยะ 20, ประกัน 10, ที่จอดรถ 500
-        assert inv102["total"] == 100 + 400 + 250 + 20 + 10 + 500
+        # น้ำ 2 หน่วย เหมาจ่าย 65, ไฟ 400, ส่วนกลาง 250, ขยะ 20, ประกัน 10, ที่จอดรถ 500
+        assert inv102["total"] == 65 + 400 + 250 + 20 + 10 + 500
         assert inv102["invoice_no"] == "0002/09/2026"
         assert db.execute("SELECT COUNT(*) FROM invoices").fetchone()[0] == 2
         inv101 = db.execute("SELECT * FROM invoices WHERE unit_no='101'").fetchone()
 
     # รับชำระบางส่วน แล้วครบ
     s.post(f"/admin/invoices/{inv101['id']}/pay", {"amount": "300", "paid_at": "2026-09-05"})
-    s.post(f"/admin/invoices/{inv101['id']}/pay", {"amount": "1210", "paid_at": "2026-10-06"})
+    s.post(f"/admin/invoices/{inv101['id']}/pay", {"amount": "1190", "paid_at": "2026-10-06"})
     with app.app_context():
         db = get_db()
         assert db.execute("SELECT status FROM invoices WHERE id=?", (inv101["id"],)).fetchone()[0] == "paid"
@@ -322,3 +329,26 @@ def test_example_settings_migrate_and_meter_dates(app, client):
         inv_id = it["invoice_id"]
     page = client.get(f"/admin/invoices/{inv_id}").get_data(as_text=True)
     assert "จดครั้งก่อน 8 ก.ย. 69" in page and "จดครั้งหลัง 8 ต.ค. 69" in page and "logo.png" in page
+
+
+def test_owner_and_tenant_on_bill(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/new", {"unit_no": "26/94", "owner_name": "สมชาย เจ้าของ", "phone": "0811111111",
+                                "tenant_name": "สมศรี ผู้เช่า", "tenant_phone": "0822222222", "active": "1"})
+    s.post("/admin/units/import", {"csv_text": "26/95,26,3,30,มานะ,081,ปิติ,082\n26/96,26,3,30,ชูใจ,083\n"})
+    with app.app_context():
+        db = get_db()
+        rows = {r["unit_no"]: r for r in db.execute("SELECT * FROM units")}
+        assert (rows["26/94"]["tenant_name"], rows["26/94"]["tenant_phone"]) == ("สมศรี ผู้เช่า", "0822222222")
+        assert rows["26/95"]["tenant_name"] == "ปิติ" and rows["26/96"]["tenant_name"] == ""
+        db.execute("UPDATE charge_types SET active=0 WHERE method LIKE 'meter%'")
+        db.commit()
+    assert "สมศรี ผู้เช่า" in client.get("/admin/units?q=สมศรี").get_data(as_text=True)
+    s.post("/admin/billing", {"period": "2026-10"})
+    with app.app_context():
+        inv = get_db().execute("SELECT * FROM invoices WHERE unit_no='26/94'").fetchone()
+        assert (inv["owner_name"], inv["tenant_name"]) == ("สมชาย เจ้าของ", "สมศรี ผู้เช่า")
+    page = client.get(f"/admin/invoices/{inv['id']}").get_data(as_text=True)
+    assert "เจ้าของห้องชุด" in page and "ผู้เช่า" in page and "สมศรี ผู้เช่า" in page
+    assert 'name="email"' not in client.get("/admin/units/new").get_data(as_text=True)

@@ -10,7 +10,8 @@
   </div>
 </div>
 <div class="grid grid-3" style="margin-bottom:1.25rem">
-  <div class="stat"><div class="label">เจ้าของ / ผู้พักอาศัย</div><div class="value" style="font-size:1.1rem">{{ unit.owner_name or '-' }}</div><div class="sub">{{ unit.phone }} {{ unit.email }}</div></div>
+  <div class="stat"><div class="label">เจ้าของห้องชุด</div><div class="value" style="font-size:1.1rem">{{ unit.owner_name or '-' }}</div><div class="sub">{{ ('โทร ' ~ unit.phone) if unit.phone }}</div>
+    <div class="label" style="margin-top:.5rem">ผู้เช่า / ผู้พักอาศัย</div><div class="value" style="font-size:1.1rem">{{ unit.tenant_name or '-' }}</div><div class="sub">{{ ('โทร ' ~ unit.tenant_phone) if unit.tenant_phone }}</div></div>
   <div class="stat"><div class="label">อาคาร / ชั้น / พื้นที่</div><div class="value" style="font-size:1.1rem">{{ unit.building or '-' }} / {{ unit.floor or '-' }} / {{ unit.area_sqm|num }} ตร.ม.</div></div>
   {% set due = invoices|selectattr('status', 'in', ['unpaid', 'partial'])|list %}
   <div class="stat"><div class="label">ค้างชำระ</div><div class="value">{{ (due|sum(attribute='total') - due|sum(attribute='paid_amount'))|baht }}</div><div class="sub">{{ due|length }} ใบแจ้งหนี้</div></div>

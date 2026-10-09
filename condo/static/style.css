@@ -89,7 +89,7 @@ tfoot td { font-weight: 700; background: #fafbfc; }
 form .field { margin-bottom: .9rem; }
 label { display: block; font-weight: 600; font-size: .88rem; margin-bottom: .25rem; }
 label.check { display: flex; align-items: center; gap: .4rem; font-weight: 400; }
-input[type=text], input[type=password], input[type=number], input[type=email], input[type=date], input[type=month],
+input[type=text], input[type=password], input[type=number], input[type=email], input[type=tel], input[type=date], input[type=month],
 select, textarea {
   width: 100%; padding: .5rem .65rem; border: 1px solid #cfd6df; border-radius: 8px; font: inherit; background: #fff;
 }
@@ -211,6 +211,7 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 .bill-items .item-meter b { color: var(--b-ink); font-weight: 600; }
 .bill-items .unit { font-size: .82em; color: #6b7785; }
 .bill-items .amount { font-weight: 600; }
+.bill-items .flat { font-size: .82em; background: var(--b-soft); color: var(--b-main); border-radius: 999px; padding: .05rem .5rem; white-space: nowrap; }
 .bill-items tr.is-penalty .item-name { color: #b23b2e; }
 .bill-subtotals { display: flex; justify-content: flex-end; gap: 1.5rem; font-size: .88em; color: #52606d; margin-top: .4rem; }
 

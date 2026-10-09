@@ -24,7 +24,7 @@
     {% for r in rows %}
       <tr>
         <td><b>{{ r.unit.unit_no }}</b>{% if r.invoiced %} <span class="badge paid" title="ออกบิลงวดนี้แล้ว">ออกบิลแล้ว</span>{% endif %}</td>
-        <td class="small">{{ r.unit.owner_name }}</td>
+        <td class="small">{{ r.unit.owner_name }}{% if r.unit.tenant_name %}<div class="muted">ผู้เช่า: {{ r.unit.tenant_name }}</div>{% endif %}</td>
         <td class="num"><input class="cell" type="number" step="0.01" name="prev_{{ r.unit.id }}" value="{{ r.prev|num|replace(',', '') }}" {{ 'readonly' if r.invoiced }}></td>
         <td class="num"><input class="cell curr" type="number" step="0.01" name="curr_{{ r.unit.id }}" value="{{ (r.curr|num|replace(',', '')) if r.curr is not none else '' }}" {{ 'readonly' if r.invoiced }}></td>
         <td><input type="checkbox" name="reset_{{ r.unit.id }}" value="1" title="มิเตอร์เปลี่ยนใหม่/วนรอบ" {{ 'disabled' if r.invoiced }}></td>

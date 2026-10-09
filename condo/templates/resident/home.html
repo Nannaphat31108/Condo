@@ -4,7 +4,8 @@
 <h1>ห้อง {{ unit.unit_no if unit else '-' }}</h1>
 <div class="grid grid-3" style="margin-bottom:1.25rem">
   <div class="stat"><div class="label">ยอดค้างชำระ</div><div class="value" style="color:{{ 'var(--danger)' if outstanding > 0 else 'var(--success)' }}">{{ outstanding|baht }}</div><div class="sub">บาท</div></div>
-  <div class="stat"><div class="label">ชื่อ</div><div class="value" style="font-size:1.1rem">{{ unit.owner_name if unit else '-' }}</div></div>
+  <div class="stat"><div class="label">เจ้าของห้องชุด</div><div class="value" style="font-size:1.1rem">{{ unit.owner_name or '-' if unit else '-' }}</div>
+    {% if unit and unit.tenant_name %}<div class="sub">ผู้เช่า: {{ unit.tenant_name }}</div>{% endif %}</div>
   <div class="stat"><div class="label">ช่องทางชำระเงิน</div><div class="small" style="margin-top:.3rem">{{ settings.bank_info }}</div></div>
 </div>
 <div class="card">

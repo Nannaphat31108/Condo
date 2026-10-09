@@ -24,7 +24,7 @@
       {% for inv in invoices %}
         <tr data-unit="{{ inv.unit_no }}">
           <td><input type="checkbox" class="pick" name="pay_{{ inv.id }}" value="1"></td>
-          <td><b>{{ inv.unit_no }}</b></td><td class="small">{{ inv.owner_name }}</td>
+          <td><b>{{ inv.unit_no }}</b></td><td class="small">{{ inv.owner_name }}{% if inv.tenant_name %}<div class="muted">ผู้เช่า: {{ inv.tenant_name }}</div>{% endif %}</td>
           <td><a href="{{ url_for('admin.invoice_detail', invoice_id=inv.id) }}">{{ inv.invoice_no }}</a></td>
           <td class="num">{{ (inv.total - inv.paid_amount)|baht }}</td>
           <td class="num"><input class="cell" type="number" step="0.01" min="0.01" name="amount_{{ inv.id }}" value="{{ '%.2f'|format(inv.total - inv.paid_amount) }}"></td>

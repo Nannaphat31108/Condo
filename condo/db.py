@@ -18,8 +18,10 @@ CREATE TABLE IF NOT EXISTS units (
     building    TEXT DEFAULT '',
     floor       TEXT DEFAULT '',
     area_sqm    REAL NOT NULL DEFAULT 0,
-    owner_name  TEXT DEFAULT '',
-    phone       TEXT DEFAULT '',
+    owner_name  TEXT DEFAULT '',              -- เจ้าของห้องชุด
+    phone       TEXT DEFAULT '',              -- เบอร์โทรเจ้าของ
+    tenant_name TEXT DEFAULT '',              -- ผู้เช่า / ผู้พักอาศัย (ถ้ามี)
+    tenant_phone TEXT DEFAULT '',
     email       TEXT DEFAULT '',
     note        TEXT DEFAULT '',
     active      INTEGER NOT NULL DEFAULT 1,
@@ -97,6 +99,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     unit_id           INTEGER NOT NULL REFERENCES units(id),
     unit_no           TEXT NOT NULL,          -- เก็บสำเนาไว้เป็นประวัติ
     owner_name        TEXT DEFAULT '',
+    tenant_name       TEXT DEFAULT '',
     period            TEXT NOT NULL,
     issue_date        TEXT NOT NULL,
     due_date          TEXT NOT NULL,
@@ -171,12 +174,13 @@ DEFAULT_SETTINGS = {
     "invoice_note": "กรุณาชำระภายในวันครบกำหนด หากเกินกำหนดจะมีเบี้ยปรับตามระเบียบนิติบุคคล",
 }
 
+WATER_DESCRIPTION = "ใช้ 1-4 หน่วย เหมาจ่าย 65 บาท / 5 หน่วยขึ้นไป หน่วยละ 16 บาท"
+
 DEFAULT_CHARGE_TYPES = [
     dict(name="ค่าส่วนกลาง", method="fixed", rate=250, unit_label="เดือน", sort_order=5, active=1,
          description="เหมาจ่ายเดือนละ 250 บาทต่อห้อง"),
-    dict(name="ค่าน้ำประปา", method="meter_rate", rate=18, min_charge=100, fixed_fee=0,
-         unit_label="ลบ.ม.", sort_order=10, active=1,
-         description="คิดตามมิเตอร์ หน่วยละ 18 บาท ขั้นต่ำ 100 บาท"),
+    dict(name="ค่าน้ำประปา", method="meter_rate", rate=16, min_charge=65, fixed_fee=0,
+         unit_label="หน่วย", sort_order=10, active=1, description=WATER_DESCRIPTION),
     dict(name="ค่าไฟฟ้า", method="meter_rate", rate=8, min_charge=0, fixed_fee=0,
          unit_label="kWh", sort_order=20, active=1,
          description="คิดตามมิเตอร์ หน่วยละ 8 บาท"),
@@ -210,6 +214,16 @@ def migrate(db):
             db.execute(f"ALTER TABLE invoice_items ADD COLUMN {name} {ddl}")
     if "read_date" not in {r["name"] for r in db.execute("PRAGMA table_info(meter_readings)")}:
         db.execute("ALTER TABLE meter_readings ADD COLUMN read_date TEXT")
+    unit_cols = {r["name"] for r in db.execute("PRAGMA table_info(units)")}
+    for name in ("tenant_name", "tenant_phone"):
+        if name not in unit_cols:
+            db.execute(f"ALTER TABLE units ADD COLUMN {name} TEXT DEFAULT ''")
+    if "tenant_name" not in {r["name"] for r in db.execute("PRAGMA table_info(invoices)")}:
+        db.execute("ALTER TABLE invoices ADD COLUMN tenant_name TEXT DEFAULT ''")
+    # อัตราค่าน้ำเดิม (18 บาท ขั้นต่ำ 100) ที่ยังไม่ได้แก้ -> อัตราจริงของนิติ
+    db.execute("UPDATE charge_types SET rate=16, min_charge=65, unit_label='หน่วย', description=?"
+               " WHERE name='ค่าน้ำประปา' AND method='meter_rate' AND rate=18 AND min_charge=100",
+               (WATER_DESCRIPTION,))
     # ฐานข้อมูลที่ยังใช้ชื่อตัวอย่าง: เปลี่ยนเป็นข้อมูลนิติบุคคลจริง (เฉพาะช่องที่ยังไม่ได้แก้)
     row = db.execute("SELECT value FROM settings WHERE key='condo_name'").fetchone()
     if row and row[0] == EXAMPLE_CONDO_NAME:

@@ -21,16 +21,16 @@
         <div class="field"><label>พื้นที่ (ตร.ม.)</label><input type="number" step="0.01" name="area_sqm"></div>
       </div>
       <div class="preview-box" id="gen-preview"></div>
-      <p class="help">ชื่อเจ้าของ/เบอร์โทร ใส่เพิ่มทีหลังได้ที่หน้าห้อง หรือใช้การนำเข้า CSV ด้านขวา (เลขห้องซ้ำจะถูกข้าม)</p>
+      <p class="help">ชื่อเจ้าของ/ผู้เช่า/เบอร์โทร ใส่เพิ่มทีหลังได้ที่หน้าห้อง หรือใช้การนำเข้า CSV ด้านขวา (เลขห้องซ้ำจะถูกข้าม)</p>
       <button class="btn btn-primary">สร้างห้อง</button>
     </form>
   </div>
   <div class="card">
     <h2>นำเข้าจาก CSV / Excel</h2>
-    <p class="small">หนึ่งบรรทัดต่อหนึ่งห้อง: <code>เลขห้อง,อาคาร,ชั้น,พื้นที่,ชื่อเจ้าของ,เบอร์โทร</code> — จาก Excel ให้ Save As เป็น CSV UTF-8</p>
+    <p class="small">หนึ่งบรรทัดต่อหนึ่งห้อง: <code>เลขห้อง,อาคาร,ชั้น,พื้นที่,ชื่อเจ้าของ,โทรเจ้าของ,ชื่อผู้เช่า,โทรผู้เช่า</code> (ไม่มีผู้เช่าเว้นว่างได้) — จาก Excel ให้ Save As เป็น CSV UTF-8</p>
     <form method="post" enctype="multipart/form-data">
       {{ csrf() }}
-      <div class="field"><label>วางข้อความ</label><textarea name="csv_text" rows="8" placeholder="101,A,1,32.5,สมชาย ใจดี,0812345678&#10;102,A,1,28,สมหญิง รักดี,0899999999"></textarea></div>
+      <div class="field"><label>วางข้อความ</label><textarea name="csv_text" rows="8" placeholder="26/94,26,3,32.5,สมชาย ใจดี,0812345678,สมศรี เช่าดี,0861234567&#10;26/95,26,3,28,สมหญิง รักดี,0899999999,,"></textarea></div>
       <div class="field"><label>หรือเลือกไฟล์ .csv</label><input type="file" name="csv_file" accept=".csv,text/csv"></div>
       <button class="btn btn-primary">นำเข้า</button>
     </form>

@@ -19,7 +19,7 @@
         </select></div>
       <div class="field" id="unit-field"><label>ห้อง (สำหรับลูกบ้าน)</label>
         <select name="unit_id"><option value="">-- เลือกห้อง --</option>
-          {% for u in units %}<option value="{{ u.id }}" {{ 'selected' if user and user.unit_id == u.id }}>{{ u.unit_no }} {{ u.owner_name }}</option>{% endfor %}
+          {% for u in units %}<option value="{{ u.id }}" {{ 'selected' if user and user.unit_id == u.id }}>{{ u.unit_no }} {{ u.owner_name }}{{ (' / ผู้เช่า ' ~ u.tenant_name) if u.tenant_name }}</option>{% endfor %}
         </select></div>
     </div>
     <div class="field"><label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if not user or user.active }}> เปิดใช้งาน</label></div>

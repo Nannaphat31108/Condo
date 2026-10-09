@@ -20,7 +20,7 @@
     {% for inv in invoices %}
       {% set locked = inv.status not in ('unpaid', 'partial') %}
       <tr>
-        <td><b>{{ inv.unit_no }}</b></td><td class="small">{{ inv.owner_name }}</td>
+        <td><b>{{ inv.unit_no }}</b></td><td class="small">{{ inv.owner_name }}{% if inv.tenant_name %}<div class="muted">ผู้เช่า: {{ inv.tenant_name }}</div>{% endif %}</td>
         <td><a href="{{ url_for('admin.invoice_detail', invoice_id=inv.id) }}">{{ inv.invoice_no }}</a></td>
         {% for t in types %}
           {% set v = current.get((inv.id, t)) %}
