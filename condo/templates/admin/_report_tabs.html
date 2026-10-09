@@ -1,0 +1,4 @@
+<div class="tabs no-print">
+  <a href="{{ url_for('admin.report_daily') }}" class="{{ 'on' if request.endpoint == 'admin.report_daily' }}">รายวัน</a>
+  <a href="{{ url_for('admin.reports') }}" class="{{ 'on' if request.endpoint == 'admin.reports' }}">รายเดือน / รายปี</a>
+</div>

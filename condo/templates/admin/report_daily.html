@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}รายงานรายวัน {{ day|thaidate }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>รายงานรายวัน — {{ day|thaidate }}</h1>
+  <div class="actions no-print">
+    <form method="get" class="filters"><div class="field"><label>วันที่</label><input type="date" name="date" value="{{ day }}" onchange="this.form.submit()"></div></form>
+    <button class="btn" onclick="window.print()">พิมพ์</button>
+  </div>
+</div>
+{% include "admin/_report_tabs.html" %}
+
+<div class="grid grid-4" style="margin-bottom:1.25rem">
+  <div class="stat"><div class="label">รับเงินวันนี้</div><div class="value">{{ rows|sum(attribute='p.amount')|baht }}</div><div class="sub">บาท</div></div>
+  <div class="stat"><div class="label">จำนวนใบเสร็จ</div><div class="value">{{ rows|length }}</div><div class="sub">ใบ</div></div>
+  <div class="stat"><div class="label">ช่องทางรับเงิน</div>
+    {% for m, v in by_method.items() %}<div class="small"><b>{{ m }}</b> {{ v[0] }} ใบ · {{ v[1]|baht }}</div>{% else %}<div class="sub">—</div>{% endfor %}</div>
+  <div class="stat"><div class="label">ออกใบแจ้งหนี้วันนี้</div><div class="value">{{ issued.cnt }}</div><div class="sub">ยอด {{ issued.total|baht }} บาท</div></div>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>รับเงินแยกตามรายการ</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>รายการ</th><th class="num">จำนวนเงิน (บาท)</th></tr></thead>
+      <tbody>{% for name in item_cols %}<tr><td>{{ name }}</td><td class="num">{{ by_item[name]|baht }}</td></tr>
+      {% else %}<tr><td colspan="2" class="muted">วันนี้ยังไม่มีการรับเงิน</td></tr>{% endfor %}</tbody>
+      {% if item_cols %}<tfoot><tr><td>รวม</td><td class="num">{{ by_item.values()|sum|baht }}</td></tr></tfoot>{% endif %}
+    </table></div>
+  </div>
+  <div class="card">
+    <h2>ใบเสร็จวันนี้ ({{ rows|length }})</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>เลขที่</th><th>ห้อง</th><th>ชื่อ</th><th>ช่องทาง</th><th class="num">จำนวนเงิน</th></tr></thead>
+      <tbody>{% for r in rows %}{% set p = r.p %}
+        <tr><td><a href="{{ url_for('admin.receipt', payment_id=p.id) }}">{{ p.receipt_no }}</a></td><td>{{ p.unit_no }}</td>
+          <td class="small">{{ p.tenant_name or p.owner_name or '-' }}</td><td class="small">{{ p.method }}</td><td class="num">{{ p.amount|baht }}</td></tr>
+      {% else %}<tr><td colspan="5" class="muted">ไม่มี</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="page-head" style="margin-bottom:.5rem">
+    <h2 style="margin:0">รายวันทั้งเดือน {{ month|period }}</h2>
+    <div class="actions no-print">
+      <form method="get" class="filters"><input type="hidden" name="date" value="{{ day }}"><input type="month" name="month" value="{{ month }}" onchange="this.form.submit()"></form>
+      <a class="btn" href="{{ url_for('admin.report_daily', month=month, date=day, export='csv') }}">ส่งออก CSV</a>
+    </div>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>วันที่</th><th class="num">ใบเสร็จ</th>{% for c in cols %}<th class="num">{{ c }}</th>{% endfor %}<th class="num">รวม (บาท)</th></tr></thead>
+    <tbody>
+    {% for d, v in days %}
+      <tr class="{{ 'is-today' if d == day }}"><td class="nowrap"><a href="{{ url_for('admin.report_daily', date=d, month=month) }}">{{ d|thaidate }}</a></td><td class="num">{{ v.count }}</td>
+        {% for c in cols %}<td class="num">{{ v.parts[c]|baht if v.parts.get(c) else '—' }}</td>{% endfor %}<td class="num"><b>{{ v.total|baht }}</b></td></tr>
+    {% else %}<tr><td colspan="{{ cols|length + 3 }}" class="muted">เดือนนี้ยังไม่มีการรับเงิน</td></tr>{% endfor %}
+    </tbody>
+    {% if days %}<tfoot><tr><td>รวมทั้งเดือน</td><td class="num">{{ month_count }}</td>{% for c in cols %}<td class="num">{{ month_totals[c]|baht }}</td>{% endfor %}<td class="num">{{ month_total|baht }}</td></tr></tfoot>{% endif %}
+  </table></div>
+  <p class="help">ใบเสร็จที่จ่ายบางส่วน แบ่งยอดตามสัดส่วนรายการในบิล</p>
+</div>
+{% endblock %}

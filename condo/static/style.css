@@ -361,3 +361,4 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 .sheet td.chg.off .amt-text, .sheet td.chg.off .amt, .sheet td.chg.off .use { text-decoration: line-through; color: var(--muted); }
 .sheet td.chg.off { background: #fbf3f2; }
 .sheet td.chg.off input.cell:not(.mprev):not(.mcurr) { opacity: .5; }
+.is-today td { background: #f0f6ff; }

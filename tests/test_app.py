@@ -654,3 +654,32 @@ def test_meter_fee_for_rooms_and_reset_room(app, client):
     with app.app_context():
         nos = sorted(r[0] for r in get_db().execute("SELECT invoice_no FROM invoices"))
         assert nos == ["0001/10/2026", "0002/10/2026", "0003/10/2026"]
+
+
+def test_daily_report(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    for no in ("26/1", "26/2"):
+        s.post("/admin/units/new", {"unit_no": no, "unit_type": "room", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE charge_types SET active=0 WHERE method LIKE 'meter%'")
+        db.commit()
+    s.post("/admin/billing", {"period": "2026-10"})
+    with app.app_context():
+        invs = {r["unit_no"]: r for r in get_db().execute("SELECT * FROM invoices")}
+    total = invs["26/1"]["total"]   # ส่วนกลาง 250 + รักษามิเตอร์ 25 + ขยะ 20 + ประกัน 10 = 305
+    assert total == 305
+    s.post(f"/admin/invoices/{invs['26/1']['id']}/pay", {"amount": "305", "paid_at": "2026-10-05", "method": "เงินสด"})
+    s.post(f"/admin/invoices/{invs['26/2']['id']}/pay", {"amount": "152.50", "paid_at": "2026-10-05", "method": "โอนเงิน"})
+    s.post(f"/admin/invoices/{invs['26/2']['id']}/pay", {"amount": "152.50", "paid_at": "2026-10-07", "method": "โอนเงิน"})
+    page = client.get("/admin/reports/daily?date=2026-10-05").get_data(as_text=True)
+    assert "457.50" in page                       # รับวันที่ 5 = 305 + 152.50
+    assert "375.00" in page                       # ส่วนกลาง 250 + 125 (ครึ่งหนึ่ง)
+    assert "เงินสด" in page and "โอนเงิน" in page
+    csv_text = client.get("/admin/reports/daily?month=2026-10&export=csv").get_data(as_text=True)
+    lines = csv_text.strip().splitlines()
+    assert lines[0].lstrip("﻿").startswith("วันที่,จำนวนใบเสร็จ,ค่าส่วนกลาง")
+    assert lines[1].startswith("2026-10-05,2,375.0") and lines[1].endswith(",457.5")
+    assert lines[2].startswith("2026-10-07,1,125.0") and lines[2].endswith(",152.5")
+    assert client.get("/admin/reports/daily").status_code == 200

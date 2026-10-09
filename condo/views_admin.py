@@ -1,5 +1,6 @@
 """หน้าจอสำหรับผู้ดูแลระบบ (นิติบุคคล)"""
 import base64
+import calendar
 import csv
 import io
 import os
@@ -1249,6 +1250,88 @@ def invoices_print():
 
 
 # ---------------------------------------------------------------- reports
+def collections_between(db, start, end):
+    """รายการรับชำระระหว่างวันที่ start ถึง end (รวม) พร้อมแยกยอดตามรายการในบิล
+
+    ใบเสร็จหนึ่งใบอาจจ่ายหลายรายการ: แบ่งยอดที่รับตามสัดส่วนของรายการในบิล
+    (จ่ายครบ = ได้ยอดตรงตามรายการ) และปัดเศษให้ผลรวมตรงกับยอดที่รับจริง
+    """
+    payments = db.execute(
+        "SELECT p.*, i.invoice_no, i.unit_no, i.owner_name, i.tenant_name, i.period, i.total AS invoice_total"
+        " FROM payments p JOIN invoices i ON i.id=p.invoice_id WHERE p.paid_at BETWEEN ? AND ?"
+        " ORDER BY p.paid_at, p.id", (start, end)).fetchall()
+    items_cache, rows = {}, []
+    for p in payments:
+        if p["invoice_id"] not in items_cache:
+            items_cache[p["invoice_id"]] = db.execute(
+                "SELECT description, amount + vat_amount AS amount FROM invoice_items WHERE invoice_id=?"
+                " ORDER BY sort_order, id", (p["invoice_id"],)).fetchall()
+        items = items_cache[p["invoice_id"]]
+        ratio = p["amount"] / p["invoice_total"] if p["invoice_total"] else 0
+        parts = {}
+        for it in items:
+            parts[it["description"]] = parts.get(it["description"], 0) + billing.money(it["amount"] * ratio)
+        diff = billing.money(p["amount"] - sum(parts.values()))
+        if parts and diff:
+            biggest = max(parts, key=lambda k: parts[k])
+            parts[biggest] = billing.money(parts[biggest] + diff)
+        rows.append({"p": p, "parts": parts})
+    return rows
+
+
+def item_columns(rows):
+    """ชื่อรายการเรียงตามลำดับค่าบริการ แล้วตามด้วยรายการอื่น"""
+    order = {r["name"]: (r["sort_order"], r["id"]) for r in get_db().execute("SELECT * FROM charge_types")}
+    names = {k for r in rows for k in r["parts"]}
+    return sorted(names, key=lambda n: (0, *order[n]) if n in order else (1, 0, n))
+
+
+@bp.route("/reports/daily")
+@admin_required
+def report_daily():
+    db = get_db()
+    day = request.args.get("date", "")
+    try:
+        day = date.fromisoformat(day).isoformat()
+    except ValueError:
+        day = date.today().isoformat()
+    month = request.args.get("month", "") if valid_period(request.args.get("month", "")) else day[:7]
+    # รายละเอียดของวันที่เลือก
+    rows = collections_between(db, day, day)
+    by_item, by_method = {}, {}
+    for r in rows:
+        for k, v in r["parts"].items():
+            by_item[k] = billing.money(by_item.get(k, 0) + v)
+        m = r["p"]["method"] or "-"
+        cnt, amt = by_method.get(m, (0, 0))
+        by_method[m] = (cnt + 1, billing.money(amt + r["p"]["amount"]))
+    issued = db.execute("SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS total FROM invoices"
+                        " WHERE issue_date=? AND status!='void'", (day,)).fetchone()
+    # ตารางรายวันทั้งเดือน
+    y, mo = (int(x) for x in month.split("-"))
+    last_day = calendar.monthrange(y, mo)[1]
+    month_rows = collections_between(db, f"{month}-01", f"{month}-{last_day:02d}")
+    cols = item_columns(month_rows)
+    days = {}
+    for r in month_rows:
+        d = days.setdefault(r["p"]["paid_at"][:10], {"count": 0, "total": 0.0, "parts": {}})
+        d["count"] += 1
+        d["total"] = billing.money(d["total"] + r["p"]["amount"])
+        for k, v in r["parts"].items():
+            d["parts"][k] = billing.money(d["parts"].get(k, 0) + v)
+    month_totals = {c: billing.money(sum(d["parts"].get(c, 0) for d in days.values())) for c in cols}
+    if request.args.get("export") == "csv":
+        return csv_response(
+            f"daily-{month}.csv", ["วันที่", "จำนวนใบเสร็จ", *cols, "รวม"],
+            [[d, v["count"], *[v["parts"].get(c, 0) for c in cols], v["total"]] for d, v in sorted(days.items())],
+        )
+    return render_template("admin/report_daily.html", day=day, month=month, rows=rows, by_item=by_item,
+                           item_cols=item_columns(rows), by_method=by_method, issued=issued, cols=cols,
+                           days=sorted(days.items()), month_totals=month_totals,
+                           month_total=billing.money(sum(d["total"] for d in days.values())),
+                           month_count=sum(d["count"] for d in days.values()))
+
+
 @bp.route("/reports")
 @admin_required
 def reports():

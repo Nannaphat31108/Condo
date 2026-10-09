@@ -30,7 +30,7 @@
         <a href="{{ url_for('admin.invoices') }}" class="{{ 'active' if ep in ('admin.invoices', 'admin.invoice_detail') }}">ใบแจ้งหนี้ / รับชำระ</a>
         <a href="{{ url_for('admin.payments_bulk') }}" class="{{ 'active' if ep == 'admin.payments_bulk' }}">รับชำระหลายห้อง</a>
         <a href="{{ url_for('admin.receipts_print') }}" class="{{ 'active' if ep == 'admin.receipts_print' }}">พิมพ์ใบเสร็จ</a>
-        <a href="{{ url_for('admin.reports') }}" class="{{ 'active' if ep == 'admin.reports' }}">รายงาน / ข้อมูลย้อนหลัง</a>
+        <a href="{{ url_for('admin.reports') }}" class="{{ 'active' if ep in ('admin.reports', 'admin.report_daily') }}">รายงาน / ข้อมูลย้อนหลัง</a>
         <div class="section">ข้อมูลหลัก</div>
         <a href="{{ url_for('admin.units') }}" class="{{ 'active' if ep.startswith('admin.unit') }}">ห้องชุด / ลูกบ้าน</a>
         <a href="{{ url_for('admin.charges') }}" class="{{ 'active' if ep.startswith('admin.charge') }}">ตั้งค่าค่าบริการ</a>
