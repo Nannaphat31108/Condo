@@ -48,6 +48,27 @@
   </form>
   {% endif %}
 
+  {% if admin and inv.status in ('unpaid', 'partial') %}
+  <h3 style="margin-top:1.25rem">เพิ่มเบี้ยปรับ / รายการอื่นในบิลนี้</h3>
+  {% set extra = items|selectattr('kind', 'ne', 'auto')|list %}
+  {% if extra %}
+  <table style="margin-bottom:.75rem">
+    {% for it in extra %}<tr><td>{{ it.description }} {% if it.kind == 'penalty' %}<span class="badge partial">เบี้ยปรับ</span>{% endif %}</td><td class="num">{{ it.amount|baht }}</td>
+      <td class="num">{{ post_button(url_for('admin.invoice_item_delete', item_id=it.id), 'ลบ', 'ยืนยันลบ ' ~ it.description ~ ' ?', 'btn btn-sm btn-danger') }}</td></tr>{% endfor %}
+  </table>
+  {% endif %}
+  <form method="post" action="{{ url_for('admin.invoice_add_item', invoice_id=inv.id) }}">
+    {{ csrf() }}
+    <div class="form-row">
+      <div class="field"><label>รายการ</label><input type="text" name="description" list="penalty-types" required placeholder="เลือกหรือพิมพ์ เช่น เบี้ยปรับค่าน้ำ"></div>
+      <div class="field"><label>จำนวนเงิน (บาท)</label><input type="number" step="0.01" name="amount" required></div>
+    </div>
+    <datalist id="penalty-types">{% for t in penalty_types %}<option value="{{ t }}">{% endfor %}</datalist>
+    <button class="btn">เพิ่มในบิล</button>
+    <span class="help">ยอดรวมบิลจะคำนวณใหม่อัตโนมัติ</span>
+  </form>
+  {% endif %}
+
   {% if admin and inv.status != 'void' and not inv.paid_amount %}
   <div style="margin-top:1.25rem;border-top:1px solid var(--line);padding-top:1rem">
     {{ post_button(url_for('admin.invoice_void', invoice_id=inv.id), 'ยกเลิกใบแจ้งหนี้นี้', 'ยืนยันยกเลิกใบแจ้งหนี้ ' ~ inv.invoice_no ~ ' ? (สามารถออกบิลใหม่ได้ภายหลัง)', 'btn btn-danger') }}

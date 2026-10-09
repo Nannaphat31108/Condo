@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, status_badge %}
+{% block content %}
+<div class="page-head">
+  <h1>กรอกเบี้ยปรับ งวด {{ period|period }}</h1>
+  <form method="get" class="filters"><div class="field"><label>งวดเดือน</label><input type="month" name="period" value="{{ period }}" onchange="this.form.submit()"></div></form>
+</div>
+<p class="muted small">กรอกจำนวนเงินเบี้ยปรับของแต่ละห้องเอง (ใส่ 0 หรือเว้นว่างเพื่อลบ) ระบบจะเพิ่มเป็นรายการในใบแจ้งหนี้และคำนวณยอดรวมใหม่ให้ทันที
+  — บิลที่ชำระครบแล้วแก้ไม่ได้ · เพิ่ม/แก้ชนิดเบี้ยปรับได้ที่ <a href="{{ url_for('admin.settings_page') }}">ตั้งค่าทั่วไป</a></p>
+{% if not types %}
+  <div class="flash info">ยังไม่มีชนิดเบี้ยปรับ กรุณาเพิ่มที่ <a href="{{ url_for('admin.settings_page') }}">ตั้งค่าทั่วไป</a></div>
+{% elif not invoices %}
+  <div class="flash info">งวดนี้ยังไม่มีใบแจ้งหนี้ — <a href="{{ url_for('admin.billing_page', period=period) }}">ไปออกใบแจ้งหนี้</a> ก่อน</div>
+{% else %}
+<form method="post">
+  {{ csrf() }}<input type="hidden" name="period" value="{{ period }}">
+  <div class="card"><div class="table-wrap"><table>
+    <thead><tr><th>ห้อง</th><th>ชื่อ</th><th>เลขที่บิล</th>{% for t in types %}<th class="num">{{ t }} (บาท)</th>{% endfor %}<th class="num">ยอดรวมบิล</th><th>สถานะ</th></tr></thead>
+    <tbody>
+    {% for inv in invoices %}
+      {% set locked = inv.status not in ('unpaid', 'partial') %}
+      <tr>
+        <td><b>{{ inv.unit_no }}</b></td><td class="small">{{ inv.owner_name }}</td>
+        <td><a href="{{ url_for('admin.invoice_detail', invoice_id=inv.id) }}">{{ inv.invoice_no }}</a></td>
+        {% for t in types %}
+          {% set v = current.get((inv.id, t)) %}
+          <td class="num"><input class="cell pen" type="number" step="0.01" min="0" name="p_{{ inv.id }}_{{ loop.index0 }}" value="{{ '%.2f'|format(v) if v else '' }}" {{ 'disabled' if locked }}></td>
+        {% endfor %}
+        <td class="num">{{ inv.total|baht }}</td><td>{{ status_badge(inv.status) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div></div>
+  <button class="btn btn-primary">บันทึกเบี้ยปรับ</button>
+</form>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+var cells = Array.prototype.slice.call(document.querySelectorAll('input.pen:not([disabled])'));
+cells.forEach(function (c, i) {
+  c.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); if (cells[i + 1]) cells[i + 1].focus(); }
+  });
+});
+</script>
+{% endblock %}

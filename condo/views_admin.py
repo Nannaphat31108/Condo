@@ -599,7 +599,7 @@ def load_invoice(invoice_id):
 def invoice_detail(invoice_id):
     inv, items, payments, unit = load_invoice(invoice_id)
     return render_template("invoice.html", inv=inv, items=items, payments=payments, unit=unit, admin=True,
-                           today=date.today().isoformat())
+                           today=date.today().isoformat(), penalty_types=penalty_type_list())
 
 
 @bp.route("/invoices/<int:invoice_id>/pay", methods=("POST",))
@@ -616,7 +616,7 @@ def invoice_pay(invoice_id):
     elif amount > billing.money(inv["total"] - inv["paid_amount"]) + 0.005:
         flash("จำนวนเงินเกินยอดค้างชำระ", "error")
     else:
-        receipt_no = billing.next_number(db, "payments", "receipt_no", f"RC{paid_at[:7].replace('-', '')}-")
+        receipt_no = billing.next_number(db, "payments", "receipt_no", paid_at)
         db.execute(
             "INSERT INTO payments (invoice_id, receipt_no, paid_at, amount, method, reference, note, created_by)"
             " VALUES (?,?,?,?,?,?,?,?)",
@@ -628,6 +628,102 @@ def invoice_pay(invoice_id):
         db.commit()
         flash(f"บันทึกรับชำระเรียบร้อย ใบเสร็จเลขที่ {receipt_no}", "success")
     return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))
+
+
+@bp.route("/invoices/<int:invoice_id>/items", methods=("POST",))
+@admin_required
+def invoice_add_item(invoice_id):
+    """แอดมินเพิ่มรายการ/เบี้ยปรับในบิลเอง"""
+    db = get_db()
+    inv = get_or_404("SELECT * FROM invoices WHERE id=?", (invoice_id,))
+    description = request.form.get("description", "").strip()
+    amount = to_float(request.form.get("amount"))
+    penalty_types = penalty_type_list()
+    if not billing.invoice_editable(inv):
+        flash("บิลนี้ชำระครบหรือยกเลิกแล้ว แก้ไขรายการไม่ได้", "error")
+    elif not description or amount == 0:
+        flash("กรุณากรอกรายการและจำนวนเงิน", "error")
+    elif billing.money(inv["total"] + amount) < inv["paid_amount"]:
+        flash("ยอดบิลหลังแก้ไขจะน้อยกว่ายอดที่ชำระแล้ว", "error")
+    else:
+        if description in penalty_types:
+            current = db.execute("SELECT COALESCE(SUM(amount),0) FROM invoice_items WHERE invoice_id=? AND"
+                                 " kind='penalty' AND description=?", (invoice_id, description)).fetchone()[0]
+            billing.set_penalty(db, invoice_id, description, current + amount)
+        else:
+            billing.add_manual_item(db, invoice_id, description, amount)
+        log_activity(g.user, f"เพิ่ม '{description}' {amount:,.2f} บาท ในบิล {inv['invoice_no']}")
+        db.commit()
+        flash(f"เพิ่ม {description} แล้ว ยอดบิลถูกคำนวณใหม่", "success")
+    return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))
+
+
+@bp.route("/invoice-items/<int:item_id>/delete", methods=("POST",))
+@admin_required
+def invoice_item_delete(item_id):
+    db = get_db()
+    item = get_or_404("SELECT * FROM invoice_items WHERE id=?", (item_id,))
+    inv = db.execute("SELECT * FROM invoices WHERE id=?", (item["invoice_id"],)).fetchone()
+    if item["kind"] == "auto":
+        flash("รายการที่ระบบคำนวณลบไม่ได้ (ให้ยกเลิกบิลแล้วออกใหม่แทน)", "error")
+    elif not billing.invoice_editable(inv):
+        flash("บิลนี้ชำระครบหรือยกเลิกแล้ว แก้ไขรายการไม่ได้", "error")
+    elif billing.money(inv["total"] - item["amount"] - item["vat_amount"]) < inv["paid_amount"]:
+        flash("ยอดบิลหลังลบรายการจะน้อยกว่ายอดที่ชำระแล้ว", "error")
+    else:
+        db.execute("DELETE FROM invoice_items WHERE id=?", (item_id,))
+        # ถ้ารายการมาจาก "รายการเรียกเก็บเพิ่มเติม" ให้ลบต้นทางด้วย จะได้ไม่ถูกเรียกเก็บซ้ำในบิลถัดไป
+        db.execute("DELETE FROM adhoc_charges WHERE invoice_id=? AND description=? AND amount=?",
+                   (inv["id"], item["description"], item["amount"]))
+        billing.recalc_invoice(db, inv["id"])
+        log_activity(g.user, f"ลบรายการ '{item['description']}' จากบิล {inv['invoice_no']}")
+        db.commit()
+        flash("ลบรายการแล้ว ยอดบิลถูกคำนวณใหม่", "success")
+    return redirect(url_for("admin.invoice_detail", invoice_id=item["invoice_id"]))
+
+
+def penalty_type_list():
+    return [x.strip() for x in get_settings().get("penalty_types", "").splitlines() if x.strip()]
+
+
+@bp.route("/penalties", methods=("GET", "POST"))
+@admin_required
+def penalties():
+    """กรอกเบี้ยปรับ (เช่น เบี้ยปรับ, เบี้ยปรับค่าน้ำ) ให้แต่ละห้องเองในงวดนั้น"""
+    db = get_db()
+    period = get_period_arg()
+    types = penalty_type_list()
+    invoices_ = db.execute("SELECT * FROM invoices WHERE period=? AND status!='void' ORDER BY unit_no",
+                           (period,)).fetchall()
+    if request.method == "POST":
+        changed, errors = 0, []
+        for inv in invoices_:
+            if not billing.invoice_editable(inv):
+                continue
+            for idx, name in enumerate(types):
+                raw = request.form.get(f"p_{inv['id']}_{idx}")
+                if raw is None:
+                    continue
+                if billing.set_penalty(db, inv["id"], name, to_float(raw)):
+                    changed += 1
+            fresh = db.execute("SELECT total, paid_amount FROM invoices WHERE id=?", (inv["id"],)).fetchone()
+            if fresh["total"] + 0.005 < fresh["paid_amount"]:
+                errors.append(inv["unit_no"])
+        if errors:
+            db.rollback()
+            flash("ยอดบิลหลังใส่เบี้ยปรับน้อยกว่ายอดที่ชำระแล้ว: ห้อง " + ", ".join(errors) + " (ยังไม่บันทึก)", "error")
+        else:
+            log_activity(g.user, f"บันทึกเบี้ยปรับงวด {period} ({changed} รายการ)")
+            db.commit()
+            flash(f"บันทึกเบี้ยปรับแล้ว ({changed} รายการที่เปลี่ยนแปลง) ยอดบิลถูกคำนวณใหม่", "success")
+        return redirect(url_for("admin.penalties", period=period))
+
+    current = {}
+    for row in db.execute(
+        "SELECT ii.invoice_id, ii.description, ii.amount FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id"
+        " WHERE i.period=? AND ii.kind='penalty'", (period,)):
+        current[(row["invoice_id"], row["description"])] = row["amount"]
+    return render_template("admin/penalties.html", period=period, types=types, invoices=invoices_, current=current)
 
 
 @bp.route("/payments/<int:payment_id>/delete", methods=("POST",))
@@ -783,10 +879,8 @@ def settings_page():
             value = request.form.get(key, "").strip()
             if key in ("issue_day", "due_days"):
                 value = str(max(int(to_float(value, 1)), 0))
-            if key == "late_fee_value":
-                value = str(to_float(value))
-            if key == "late_fee_type" and value not in ("none", "fixed", "percent"):
-                value = "none"
+            if key == "penalty_types":
+                value = "\n".join(dict.fromkeys(x.strip() for x in value.splitlines() if x.strip()))
             db.execute("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                        (key, value))
         log_activity(g.user, "แก้ไขการตั้งค่าระบบ")

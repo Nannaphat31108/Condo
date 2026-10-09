@@ -101,6 +101,7 @@ def compute_item(ct, unit, reading=None, override=None):
     """
     method = ct["method"]
     rate = float(ct["rate"] or 0)
+    meter_prev = meter_curr = None
     min_charge = float(ct["min_charge"] or 0)
     fixed_fee = float(ct["fixed_fee"] or 0)
     detail_parts = []
@@ -109,6 +110,7 @@ def compute_item(ct, unit, reading=None, override=None):
         if reading is None:
             return None
         prev, curr = float(reading["prev_reading"]), float(reading["curr_reading"])
+        meter_prev, meter_curr = prev, curr
         usage = max(curr - prev, 0)
         quantity = usage
         detail_parts.append(f"เลขมิเตอร์ {fmt_num(prev)} → {fmt_num(curr)} ใช้ {fmt_num(usage)} {ct['unit_label'] or ''}".strip())
@@ -150,18 +152,10 @@ def compute_item(ct, unit, reading=None, override=None):
         "amount": amount,
         "vat_amount": vat_amount,
         "sort_order": ct["sort_order"],
+        "kind": "auto",
+        "meter_prev": meter_prev,
+        "meter_curr": meter_curr,
     }
-
-
-def compute_late_fee(settings, overdue_invoice):
-    fee_type = settings.get("late_fee_type", "none")
-    value = float(settings.get("late_fee_value") or 0)
-    if fee_type == "fixed":
-        return money(value)
-    if fee_type == "percent":
-        outstanding = overdue_invoice["total"] - overdue_invoice["paid_amount"]
-        return money(outstanding * value / 100)
-    return 0.0
 
 
 def billing_dates(period, settings):
@@ -172,17 +166,20 @@ def billing_dates(period, settings):
     return issue.isoformat(), due.isoformat()
 
 
-def next_number(db, table, column, prefix):
-    row = db.execute(
-        f"SELECT {column} FROM {table} WHERE {column} LIKE ? ORDER BY {column} DESC LIMIT 1",
-        (prefix + "%",),
-    ).fetchone()
-    seq = int(row[0][len(prefix):]) + 1 if row else 1
-    return f"{prefix}{seq:04d}"
+def next_number(db, table, column, period):
+    """เลขที่เอกสารรันใหม่ทุกเดือน รูปแบบ 0001/10/2026 (ลำดับ/เดือน/ปี)
+
+    period คือ 'YYYY-MM' หรือวันที่ 'YYYY-MM-DD' ของเดือนที่ออกเอกสาร
+    """
+    year, month = period[:4], period[5:7]
+    suffix = f"/{month}/{year}"
+    rows = db.execute(f"SELECT {column} FROM {table} WHERE {column} LIKE ?", ("%" + suffix,)).fetchall()
+    seq = max((int(r[0].split("/")[0]) for r in rows if r[0].split("/")[0].isdigit()), default=0) + 1
+    return f"{seq:04d}{suffix}"
 
 
-def build_unit_items(db, unit, period, settings, charge_types, selections, today=None):
-    """สร้างรายการทั้งหมดของห้องในงวดนั้น คืน (items, missing_meters, overdue_ids, adhoc_ids)"""
+def build_unit_items(db, unit, period, charge_types, selections):
+    """สร้างรายการทั้งหมดของห้องในงวดนั้น คืน (items, missing_meters, adhoc_ids)"""
     items, missing = [], []
     for ct in charge_types:
         sel = selections.get(ct["id"], {})
@@ -208,28 +205,9 @@ def build_unit_items(db, unit, period, settings, charge_types, selections, today
         items.append({
             "charge_type_id": None, "description": a["description"], "detail": f"รายการเพิ่มเติม งวด {period_label(a['period'])}",
             "quantity": 1, "unit_label": "รายการ", "unit_price": a["amount"], "amount": money(a["amount"]),
-            "vat_amount": 0.0, "sort_order": 900,
+            "vat_amount": 0.0, "sort_order": 900, "kind": "manual", "meter_prev": None, "meter_curr": None,
         })
-
-    # ค่าปรับชำระล่าช้า ของบิลงวดก่อนที่เลยกำหนดและยังไม่ชำระครบ
-    today = today or date.today().isoformat()
-    overdue = db.execute(
-        "SELECT * FROM invoices WHERE unit_id=? AND period<? AND status IN ('unpaid','partial') "
-        "AND due_date<? AND late_fee_charged=0 ORDER BY period",
-        (unit["id"], period, today),
-    ).fetchall()
-    overdue_ids = []
-    for inv in overdue:
-        fee = compute_late_fee(settings, inv)
-        if fee > 0:
-            items.append({
-                "charge_type_id": None, "description": "ค่าปรับชำระล่าช้า",
-                "detail": f"ใบแจ้งหนี้ {inv['invoice_no']} งวด {period_label(inv['period'])} ครบกำหนด {inv['due_date']}",
-                "quantity": 1, "unit_label": "ครั้ง", "unit_price": fee, "amount": fee,
-                "vat_amount": 0.0, "sort_order": 950,
-            })
-            overdue_ids.append(inv["id"])
-    return items, missing, overdue_ids, [a["id"] for a in adhoc]
+    return items, missing, [a["id"] for a in adhoc]
 
 
 def load_selections(db):
@@ -239,7 +217,18 @@ def load_selections(db):
     return selections
 
 
-def generate_invoices(db, period, settings, unit_ids=None, today=None):
+ITEM_COLUMNS = ("charge_type_id", "description", "detail", "quantity", "unit_label", "unit_price", "amount",
+                "vat_amount", "sort_order", "kind", "meter_prev", "meter_curr")
+
+
+def insert_item(db, invoice_id, item):
+    db.execute(
+        f"INSERT INTO invoice_items (invoice_id, {', '.join(ITEM_COLUMNS)}) VALUES (?{', ?' * len(ITEM_COLUMNS)})",
+        [invoice_id, *(item.get(c) for c in ITEM_COLUMNS)],
+    )
+
+
+def generate_invoices(db, period, settings, unit_ids=None):
     """ออกใบแจ้งหนี้ให้ทุกห้อง (ที่ยังไม่มีบิลในงวดนี้)
 
     ห้องที่ยังไม่ได้จดมิเตอร์จะถูกข้ามไว้ก่อน เพื่อไม่ให้บิลผิด
@@ -262,9 +251,7 @@ def generate_invoices(db, period, settings, unit_ids=None, today=None):
         if exists:
             result["skipped_existing"].append(unit["unit_no"])
             continue
-        items, missing, overdue_ids, adhoc_ids = build_unit_items(
-            db, unit, period, settings, charge_types, selections, today
-        )
+        items, missing, adhoc_ids = build_unit_items(db, unit, period, charge_types, selections)
         if missing:
             result["missing_meter"].append(f"{unit['unit_no']} ({', '.join(missing)})")
             continue
@@ -273,7 +260,7 @@ def generate_invoices(db, period, settings, unit_ids=None, today=None):
             continue
         subtotal = money(sum(i["amount"] for i in items))
         vat = money(sum(i["vat_amount"] for i in items))
-        invoice_no = next_number(db, "invoices", "invoice_no", f"INV{period.replace('-', '')}-")
+        invoice_no = next_number(db, "invoices", "invoice_no", period)
         cur = db.execute(
             "INSERT INTO invoices (invoice_no, unit_id, unit_no, owner_name, period, issue_date, due_date,"
             " subtotal, vat, total, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -282,17 +269,7 @@ def generate_invoices(db, period, settings, unit_ids=None, today=None):
         )
         invoice_id = cur.lastrowid
         for order, item in enumerate(sorted(items, key=lambda i: i["sort_order"])):
-            db.execute(
-                "INSERT INTO invoice_items (invoice_id, charge_type_id, description, detail, quantity, unit_label,"
-                " unit_price, amount, vat_amount, sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (invoice_id, item["charge_type_id"], item["description"], item["detail"], item["quantity"],
-                 item["unit_label"], item["unit_price"], item["amount"], item["vat_amount"], order),
-            )
-        if overdue_ids:
-            db.execute(
-                f"UPDATE invoices SET late_fee_charged=? WHERE id IN ({','.join('?' * len(overdue_ids))})",
-                [invoice_id, *overdue_ids],
-            )
+            insert_item(db, invoice_id, {**item, "sort_order": order})
         if adhoc_ids:
             db.execute(
                 f"UPDATE adhoc_charges SET invoice_id=? WHERE id IN ({','.join('?' * len(adhoc_ids))})",
@@ -304,11 +281,59 @@ def generate_invoices(db, period, settings, unit_ids=None, today=None):
 
 
 def void_invoice(db, invoice_id):
-    """ยกเลิกบิล และปล่อยรายการเพิ่มเติม/ค่าปรับให้ไปคิดในบิลใหม่ได้"""
+    """ยกเลิกบิล และปล่อยรายการเพิ่มเติมให้ไปคิดในบิลใหม่ได้"""
     db.execute("UPDATE invoices SET status='void' WHERE id=?", (invoice_id,))
     db.execute("UPDATE adhoc_charges SET invoice_id=NULL WHERE invoice_id=?", (invoice_id,))
-    db.execute("UPDATE invoices SET late_fee_charged=0 WHERE late_fee_charged=?", (invoice_id,))
     db.commit()
+
+
+def invoice_editable(inv):
+    return inv is not None and inv["status"] in ("unpaid", "partial")
+
+
+def recalc_invoice(db, invoice_id):
+    """คำนวณยอดรวมบิลใหม่หลังเพิ่ม/แก้/ลบรายการ"""
+    row = db.execute(
+        "SELECT COALESCE(SUM(amount),0), COALESCE(SUM(vat_amount),0) FROM invoice_items WHERE invoice_id=?",
+        (invoice_id,),
+    ).fetchone()
+    subtotal, vat = money(row[0]), money(row[1])
+    db.execute("UPDATE invoices SET subtotal=?, vat=?, total=? WHERE id=?",
+               (subtotal, vat, money(subtotal + vat), invoice_id))
+    refresh_invoice_status(db, invoice_id)
+
+
+def set_penalty(db, invoice_id, name, amount):
+    """ใส่/แก้/ลบ เบี้ยปรับที่แอดมินกรอกเอง (amount = 0 คือลบออก)"""
+    amount = money(amount)
+    existing = db.execute(
+        "SELECT id, amount FROM invoice_items WHERE invoice_id=? AND kind='penalty' AND description=?",
+        (invoice_id, name),
+    ).fetchone()
+    if existing and existing["amount"] == amount:
+        return False
+    if existing and amount == 0:
+        db.execute("DELETE FROM invoice_items WHERE id=?", (existing["id"],))
+    elif existing:
+        db.execute("UPDATE invoice_items SET amount=?, unit_price=? WHERE id=?", (amount, amount, existing["id"]))
+    elif amount:
+        insert_item(db, invoice_id, {
+            "description": name, "detail": "", "quantity": 1, "unit_label": "", "unit_price": amount,
+            "amount": amount, "vat_amount": 0.0, "sort_order": 950, "kind": "penalty",
+        })
+    else:
+        return False
+    recalc_invoice(db, invoice_id)
+    return True
+
+
+def add_manual_item(db, invoice_id, description, amount):
+    amount = money(amount)
+    insert_item(db, invoice_id, {
+        "description": description, "detail": "", "quantity": 1, "unit_label": "", "unit_price": amount,
+        "amount": amount, "vat_amount": 0.0, "sort_order": 900, "kind": "manual",
+    })
+    recalc_invoice(db, invoice_id)
 
 
 def refresh_invoice_status(db, invoice_id):
@@ -325,4 +350,49 @@ def refresh_invoice_status(db, invoice_id):
     else:
         status = "partial"
     db.execute("UPDATE invoices SET paid_amount=?, status=? WHERE id=?", (paid, status, invoice_id))
-    db.commit()
+
+
+THAI_DIGITS = ["ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"]
+THAI_PLACES = ["", "สิบ", "ร้อย", "พัน", "หมื่น", "แสน"]
+
+
+def _thai_number(n, whole):
+    if n >= 1_000_000:
+        rest = n % 1_000_000
+        return _thai_number(n // 1_000_000, n // 1_000_000) + "ล้าน" + (_thai_number(rest, whole) if rest else "")
+    text, digits = "", str(n)
+    for i, ch in enumerate(digits):
+        d, place = int(ch), len(digits) - i - 1
+        if d == 0:
+            continue
+        if place == 1 and d == 1:
+            text += "สิบ"
+        elif place == 1 and d == 2:
+            text += "ยี่สิบ"
+        elif place == 0 and d == 1 and whole > 1:
+            text += "เอ็ด"
+        else:
+            text += THAI_DIGITS[d] + THAI_PLACES[place]
+    return text
+
+
+def bahttext(amount):
+    """1250.50 -> 'หนึ่งพันสองร้อยห้าสิบบาทห้าสิบสตางค์'"""
+    amount = money(amount)
+    sign = "ลบ" if amount < 0 else ""
+    satang_total = round(abs(amount) * 100)
+    baht, satang = divmod(satang_total, 100)
+    if baht == 0 and satang == 0:
+        return "ศูนย์บาทถ้วน"
+    text = (_thai_number(baht, baht) + "บาท") if baht else ""
+    text += (_thai_number(satang, satang) + "สตางค์") if satang else "ถ้วน"
+    return sign + text
+
+
+def thai_date(value):
+    """'2026-10-09' -> '9 ตุลาคม 2569'"""
+    try:
+        d = date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return value or ""
+    return f"{d.day} {THAI_MONTHS[d.month]} {d.year + 543}"

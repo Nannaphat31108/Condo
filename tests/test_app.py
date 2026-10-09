@@ -54,6 +54,16 @@ def test_charge_applies_frequency_and_window():
     assert billing.charge_applies({**row, "apply_to": "selected"}, "2026-05", 2, {2: None})
 
 
+def test_bahttext_and_numbering_helpers():
+    assert billing.bahttext(1510) == "หนึ่งพันห้าร้อยสิบบาทถ้วน"
+    assert billing.bahttext(21.25) == "ยี่สิบเอ็ดบาทยี่สิบห้าสตางค์"
+    assert billing.bahttext(101) == "หนึ่งร้อยเอ็ดบาทถ้วน"
+    assert billing.bahttext(1) == "หนึ่งบาทถ้วน"
+    assert billing.bahttext(11_000_000) == "สิบเอ็ดล้านบาทถ้วน"
+    assert billing.bahttext(0.5) == "ห้าสิบสตางค์"
+    assert billing.thai_date("2026-10-09") == "9 ตุลาคม 2569"
+
+
 def test_period_helpers():
     assert billing.period_label("2026-10") == "ตุลาคม 2569"
     assert billing.prev_period("2026-01") == "2025-12"
@@ -128,8 +138,12 @@ def test_full_billing_flow(app, client):
         db = get_db()
         invs = db.execute("SELECT * FROM invoices").fetchall()
         assert [i["unit_no"] for i in invs] == ["101"]
-        # น้ำ 10×18=180, ไฟ 100×8=800, ขยะ 30, ประกัน 50, ค่าซ่อม 250
-        assert invs[0]["total"] == 180 + 800 + 30 + 50 + 250
+        # น้ำ 10×18=180, ไฟ 100×8=800, ส่วนกลาง 250, ขยะ 20, ประกัน 10, ค่าซ่อม 250
+        assert invs[0]["total"] == 180 + 800 + 250 + 20 + 10 + 250
+        assert invs[0]["invoice_no"] == "0001/09/2026"
+        water = db.execute("SELECT * FROM invoice_items WHERE invoice_id=? AND description='ค่าน้ำประปา'",
+                           (invs[0]["id"],)).fetchone()
+        assert (water["meter_prev"], water["meter_curr"]) == (0, 10)
 
     # จดไฟห้อง 102 แล้วออกบิลซ้ำ -> ได้บิลห้อง 102 เพิ่ม ห้อง 101 ไม่ซ้ำ
     s.post("/admin/meters", {"period": "2026-09", "charge_type_id": cts["ค่าไฟฟ้า"],
@@ -138,20 +152,22 @@ def test_full_billing_flow(app, client):
     with app.app_context():
         db = get_db()
         inv102 = db.execute("SELECT * FROM invoices WHERE unit_no='102'").fetchone()
-        # น้ำขั้นต่ำ 100, ไฟ 400, ขยะ 30, ประกัน 50, ที่จอดรถ 500
-        assert inv102["total"] == 100 + 400 + 30 + 50 + 500
+        # น้ำขั้นต่ำ 100, ไฟ 400, ส่วนกลาง 250, ขยะ 20, ประกัน 10, ที่จอดรถ 500
+        assert inv102["total"] == 100 + 400 + 250 + 20 + 10 + 500
+        assert inv102["invoice_no"] == "0002/09/2026"
         assert db.execute("SELECT COUNT(*) FROM invoices").fetchone()[0] == 2
         inv101 = db.execute("SELECT * FROM invoices WHERE unit_no='101'").fetchone()
 
     # รับชำระบางส่วน แล้วครบ
     s.post(f"/admin/invoices/{inv101['id']}/pay", {"amount": "300", "paid_at": "2026-09-05"})
-    s.post(f"/admin/invoices/{inv101['id']}/pay", {"amount": "1010", "paid_at": "2026-09-06"})
+    s.post(f"/admin/invoices/{inv101['id']}/pay", {"amount": "1210", "paid_at": "2026-10-06"})
     with app.app_context():
         db = get_db()
         assert db.execute("SELECT status FROM invoices WHERE id=?", (inv101["id"],)).fetchone()[0] == "paid"
-        assert db.execute("SELECT COUNT(*) FROM payments").fetchone()[0] == 2
+        receipts = [r[0] for r in db.execute("SELECT receipt_no FROM payments ORDER BY id")]
+        assert receipts == ["0001/09/2026", "0001/10/2026"]
 
-    # งวดถัดไป: เลขครั้งก่อนต้องดึงจากงวดก่อน และห้อง 102 ค้างเกินกำหนด -> ค่าปรับ 100
+    # งวดถัดไป: เลขครั้งก่อนต้องดึงจากงวดก่อน, เลขบิลรันใหม่ตามเดือน, ไม่มีค่าปรับอัตโนมัติ
     page = client.get(f"/admin/meters?period=2026-10&charge_type_id={cts['ค่าน้ำประปา']}").get_data(as_text=True)
     assert f'name="prev_{units["101"]}" value="10"' in page
     for name in ("ค่าน้ำประปา", "ค่าไฟฟ้า"):
@@ -161,18 +177,39 @@ def test_full_billing_flow(app, client):
     s.post("/admin/billing", {"period": "2026-10"})
     with app.app_context():
         db = get_db()
-        late = db.execute("SELECT ii.* FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id"
-                          " WHERE i.period='2026-10' AND i.unit_no='102' AND ii.description='ค่าปรับชำระล่าช้า'").fetchall()
-        assert len(late) == 1 and late[0]["amount"] == 100
-        inv_oct_102 = db.execute("SELECT id FROM invoices WHERE period='2026-10' AND unit_no='102'").fetchone()[0]
+        oct_ = {r["unit_no"]: r for r in db.execute("SELECT * FROM invoices WHERE period='2026-10'")}
+        assert oct_["101"]["invoice_no"] == "0001/10/2026"
+        assert db.execute("SELECT COUNT(*) FROM invoice_items WHERE kind='penalty'").fetchone()[0] == 0
+    inv_oct_102 = oct_["102"]
 
-    # ยกเลิกบิล -> ค่าปรับคืนสถานะ ออกบิลใหม่ได้
-    s.post(f"/admin/invoices/{inv_oct_102}/void")
+    # แอดมินกรอกเบี้ยปรับเอง (เบี้ยปรับ / เบี้ยปรับค่าน้ำ)
+    s.post("/admin/penalties", {"period": "2026-10", f"p_{inv_oct_102['id']}_0": "100",
+                                f"p_{inv_oct_102['id']}_1": "50"})
+    with app.app_context():
+        db = get_db()
+        row = db.execute("SELECT * FROM invoices WHERE id=?", (inv_oct_102["id"],)).fetchone()
+        assert row["total"] == inv_oct_102["total"] + 150
+    # แก้เบี้ยปรับค่าน้ำเป็น 0 = ลบออก, เพิ่มรายการเองจากหน้าบิล
+    s.post("/admin/penalties", {"period": "2026-10", f"p_{inv_oct_102['id']}_0": "100",
+                                f"p_{inv_oct_102['id']}_1": ""})
+    s.post(f"/admin/invoices/{inv_oct_102['id']}/items", {"description": "เบี้ยปรับค่าน้ำ", "amount": "30"})
+    with app.app_context():
+        db = get_db()
+        row = db.execute("SELECT * FROM invoices WHERE id=?", (inv_oct_102["id"],)).fetchone()
+        assert row["total"] == inv_oct_102["total"] + 130
+        pens = dict(db.execute("SELECT description, amount FROM invoice_items WHERE invoice_id=? AND kind='penalty'",
+                               (inv_oct_102["id"],)).fetchall())
+        assert pens == {"เบี้ยปรับ": 100, "เบี้ยปรับค่าน้ำ": 30}
+    page = client.get(f"/admin/invoices/{inv_oct_102['id']}").get_data(as_text=True)
+    assert billing.bahttext(inv_oct_102["total"] + 130) in page
+
+    # ยกเลิกบิล -> ออกบิลใหม่ได้ ด้วยเลขที่ถัดไป
+    s.post(f"/admin/invoices/{inv_oct_102['id']}/void")
     s.post("/admin/billing", {"period": "2026-10"})
     with app.app_context():
         db = get_db()
-        assert db.execute("SELECT COUNT(*) FROM invoices WHERE period='2026-10' AND unit_no='102'"
-                          " AND status!='void'").fetchone()[0] == 1
+        new = db.execute("SELECT * FROM invoices WHERE period='2026-10' AND unit_no='102' AND status!='void'").fetchall()
+        assert len(new) == 1 and new[0]["invoice_no"] == "0003/10/2026"
 
     # ทุกหน้าของแอดมินเปิดได้
     for url in ["/admin/", "/admin/units", f"/admin/units/{units['101']}", "/admin/users", "/admin/charges",
@@ -181,7 +218,7 @@ def test_full_billing_flow(app, client):
                 f"/admin/invoices/{inv101['id']}", "/admin/invoices/print?period=2026-10", "/admin/reports?year=2026",
                 "/admin/settings", "/admin/activity", "/admin/payments/1/receipt", "/admin/export/invoices.csv",
                 "/admin/export/items.csv", "/admin/export/payments.csv", "/admin/backup", "/admin/units/import",
-                "/admin/users/new",
+                "/admin/users/new", "/admin/penalties?period=2026-10", "/admin/payments/2/receipt",
                 "/admin/charges/preview?method=meter_tiered&tiers=[{\"upto\":10,\"rate\":5}]&usage=12"]:
         assert client.get(url).status_code == 200, url
 
@@ -190,7 +227,7 @@ def test_full_billing_flow(app, client):
                                 "unit_id": units["101"], "active": "1"})
     s.post("/logout")
     s.login("room101", "secret1")
-    assert "INV202609" in client.get("/my/").get_data(as_text=True)
+    assert "0001/09/2026" in client.get("/my/").get_data(as_text=True)
     assert client.get(f"/my/invoices/{inv101['id']}").status_code == 200
     assert client.get(f"/my/invoices/{inv102['id']}").status_code == 404
     assert client.get("/admin/").status_code == 302

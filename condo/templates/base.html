@@ -25,6 +25,7 @@
         <a href="{{ url_for('admin.meters') }}" class="{{ 'active' if ep == 'admin.meters' }}">จดมิเตอร์น้ำ/ไฟ</a>
         <a href="{{ url_for('admin.adhoc') }}" class="{{ 'active' if ep == 'admin.adhoc' }}">รายการเรียกเก็บเพิ่มเติม</a>
         <a href="{{ url_for('admin.billing_page') }}" class="{{ 'active' if ep == 'admin.billing_page' }}">ออกใบแจ้งหนี้</a>
+        <a href="{{ url_for('admin.penalties') }}" class="{{ 'active' if ep == 'admin.penalties' }}">กรอกเบี้ยปรับ</a>
         <a href="{{ url_for('admin.invoices') }}" class="{{ 'active' if ep in ('admin.invoices', 'admin.invoice_detail') }}">ใบแจ้งหนี้ / รับชำระ</a>
         <a href="{{ url_for('admin.reports') }}" class="{{ 'active' if ep == 'admin.reports' }}">รายงาน / ข้อมูลย้อนหลัง</a>
         <div class="section">ข้อมูลหลัก</div>

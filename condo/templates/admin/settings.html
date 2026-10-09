@@ -17,21 +17,15 @@
       <div class="field"><label>หมายเหตุท้ายใบแจ้งหนี้</label><textarea name="invoice_note" rows="2">{{ settings.invoice_note }}</textarea></div>
     </div>
     <div class="card">
-      <h2>รอบบิลและค่าปรับ</h2>
+      <h2>รอบบิลและเบี้ยปรับ</h2>
       <div class="form-row">
         <div class="field"><label>ออกบิลวันที่ของเดือน</label><input type="number" min="1" max="31" name="issue_day" value="{{ settings.issue_day }}"></div>
         <div class="field"><label>ครบกำหนดชำระภายใน (วัน)</label><input type="number" min="0" name="due_days" value="{{ settings.due_days }}"></div>
       </div>
-      <div class="form-row">
-        <div class="field"><label>ค่าปรับชำระล่าช้า</label>
-          <select name="late_fee_type">
-            <option value="none" {{ 'selected' if settings.late_fee_type == 'none' }}>ไม่คิดค่าปรับ</option>
-            <option value="fixed" {{ 'selected' if settings.late_fee_type == 'fixed' }}>คิดเป็นจำนวนเงินคงที่ (บาท/บิล)</option>
-            <option value="percent" {{ 'selected' if settings.late_fee_type == 'percent' }}>คิดเป็น % ของยอดค้าง</option>
-          </select></div>
-        <div class="field"><label>จำนวน</label><input type="number" step="0.01" min="0" name="late_fee_value" value="{{ settings.late_fee_value }}"></div>
-      </div>
-      <p class="help">ค่าปรับจะถูกเพิ่มในบิลงวดถัดไปโดยอัตโนมัติ (ครั้งเดียวต่อบิลที่ค้างเกินกำหนด)</p>
+      <div class="field"><label>ชนิดเบี้ยปรับ (บรรทัดละ 1 ชนิด)</label>
+        <textarea name="penalty_types" rows="3">{{ settings.penalty_types }}</textarea>
+        <div class="help">แอดมินกรอกจำนวนเงินเบี้ยปรับเองที่เมนู "กรอกเบี้ยปรับ" หรือในหน้าใบแจ้งหนี้แต่ละใบ เช่น เบี้ยปรับ, เบี้ยปรับค่าน้ำ</div></div>
+      <p class="help">เลขที่ใบแจ้งหนี้และใบเสร็จรันใหม่ทุกเดือน รูปแบบ ลำดับ/เดือน/ปี เช่น 0001/10/2026</p>
       <h2 style="margin-top:1.5rem">สำรองข้อมูล</h2>
       <p class="small">ข้อมูลทั้งหมดเก็บย้อนหลังในฐานข้อมูล ควรดาวน์โหลดไฟล์สำรองเก็บไว้เป็นประจำ</p>
       <a class="btn" href="{{ url_for('admin.backup') }}">ดาวน์โหลดไฟล์สำรองข้อมูล</a>

@@ -103,7 +103,6 @@ CREATE TABLE IF NOT EXISTS invoices (
     total             REAL NOT NULL DEFAULT 0,
     paid_amount       REAL NOT NULL DEFAULT 0,
     status            TEXT NOT NULL DEFAULT 'unpaid' CHECK (status IN ('unpaid', 'partial', 'paid', 'void')),
-    late_fee_charged  INTEGER NOT NULL DEFAULT 0,
     note              TEXT DEFAULT '',
     created_at        TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
@@ -121,7 +120,10 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     unit_price     REAL NOT NULL DEFAULT 0,
     amount         REAL NOT NULL DEFAULT 0,
     vat_amount     REAL NOT NULL DEFAULT 0,
-    sort_order     INTEGER NOT NULL DEFAULT 0
+    sort_order     INTEGER NOT NULL DEFAULT 0,
+    kind           TEXT NOT NULL DEFAULT 'auto',  -- auto / manual / penalty
+    meter_prev     REAL,
+    meter_curr     REAL
 );
 
 CREATE TABLE IF NOT EXISTS payments (
@@ -153,25 +155,24 @@ DEFAULT_SETTINGS = {
     "tax_id": "",
     "issue_day": "1",          # วันที่ออกใบแจ้งหนี้
     "due_days": "15",          # ครบกำหนดชำระภายในกี่วันหลังออกบิล
-    "late_fee_type": "fixed",  # none / fixed / percent
-    "late_fee_value": "100",
+    "penalty_types": "เบี้ยปรับ\nเบี้ยปรับค่าน้ำ",  # ชนิดเบี้ยปรับที่แอดมินกรอกเอง บรรทัดละ 1 ชนิด
     "bank_info": "ธนาคาร ............ เลขที่บัญชี ............ ชื่อบัญชี ............",
-    "invoice_note": "กรุณาชำระภายในวันครบกำหนด หากเกินกำหนดจะมีค่าปรับตามระเบียบนิติบุคคล",
+    "invoice_note": "กรุณาชำระภายในวันครบกำหนด หากเกินกำหนดจะมีเบี้ยปรับตามระเบียบนิติบุคคล",
 }
 
 DEFAULT_CHARGE_TYPES = [
+    dict(name="ค่าส่วนกลาง", method="fixed", rate=250, unit_label="เดือน", sort_order=5, active=1,
+         description="เหมาจ่ายเดือนละ 250 บาทต่อห้อง"),
     dict(name="ค่าน้ำประปา", method="meter_rate", rate=18, min_charge=100, fixed_fee=0,
          unit_label="ลบ.ม.", sort_order=10, active=1,
          description="คิดตามมิเตอร์ หน่วยละ 18 บาท ขั้นต่ำ 100 บาท"),
     dict(name="ค่าไฟฟ้า", method="meter_rate", rate=8, min_charge=0, fixed_fee=0,
          unit_label="kWh", sort_order=20, active=1,
          description="คิดตามมิเตอร์ หน่วยละ 8 บาท"),
-    dict(name="ค่าขยะ", method="fixed", rate=30, unit_label="เดือน", sort_order=30, active=1,
-         description="เหมาจ่ายรายเดือน"),
-    dict(name="ค่าประกัน", method="fixed", rate=50, unit_label="เดือน", sort_order=40, active=1,
-         description="ค่าเบี้ยประกันภัยอาคาร เฉลี่ยรายเดือน"),
-    dict(name="ค่าส่วนกลาง", method="per_area", rate=35, unit_label="ตร.ม.", sort_order=50, active=0,
-         description="คิดตามพื้นที่ห้อง (เปิดใช้งานได้ที่หน้าตั้งค่าค่าบริการ)"),
+    dict(name="ค่าขยะ", method="fixed", rate=20, unit_label="เดือน", sort_order=30, active=1,
+         description="ห้องละ 20 บาทต่อเดือน"),
+    dict(name="ค่าประกัน", method="fixed", rate=10, unit_label="เดือน", sort_order=40, active=1,
+         description="ห้องละ 10 บาทต่อเดือน"),
 ]
 
 
@@ -189,8 +190,20 @@ def close_db(_exc=None):
         db.close()
 
 
+def migrate(db):
+    """อัปเดตฐานข้อมูลเดิมให้มีคอลัมน์ใหม่"""
+    cols = {r["name"] for r in db.execute("PRAGMA table_info(invoice_items)")}
+    for name, ddl in (("kind", "TEXT NOT NULL DEFAULT 'auto'"), ("meter_prev", "REAL"), ("meter_curr", "REAL")):
+        if name not in cols:
+            db.execute(f"ALTER TABLE invoice_items ADD COLUMN {name} {ddl}")
+    # รายการที่ไม่ได้มาจากค่าบริการ (รายการเพิ่มเติมเดิม) ถือเป็นรายการที่แอดมินใส่เอง
+    if "kind" not in cols:
+        db.execute("UPDATE invoice_items SET kind='manual' WHERE charge_type_id IS NULL")
+
+
 def init_db(db):
     db.executescript(SCHEMA)
+    migrate(db)
     for key, value in DEFAULT_SETTINGS.items():
         db.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
     if db.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:

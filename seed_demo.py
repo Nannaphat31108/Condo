@@ -47,12 +47,13 @@ def main():
                                " VALUES (?,?,?,?,?)", (m["id"], u["id"], period, prev, curr))
                     last[(m["id"], u["id"])] = curr
             db.commit()
-            billing.generate_invoices(db, period, get_settings(), today=f"{period}-28")
+            billing.generate_invoices(db, period, get_settings())
             for inv in db.execute("SELECT * FROM invoices WHERE period=?", (period,)).fetchall():
                 if rnd.random() < 0.8:
-                    receipt_no = billing.next_number(db, "payments", "receipt_no", f"RC{period.replace('-', '')}-")
+                    paid_at = f"{period}-{rnd.randint(2, 14):02d}"
+                    receipt_no = billing.next_number(db, "payments", "receipt_no", paid_at)
                     db.execute("INSERT INTO payments (invoice_id, receipt_no, paid_at, amount, method) VALUES (?,?,?,?,?)",
-                               (inv["id"], receipt_no, f"{period}-{rnd.randint(2, 14):02d}", inv["total"],
+                               (inv["id"], receipt_no, paid_at, inv["total"],
                                 rnd.choice(["โอนเงิน", "เงินสด", "พร้อมเพย์"])))
                     billing.refresh_invoice_status(db, inv["id"])
         db.commit()

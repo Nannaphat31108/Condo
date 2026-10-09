@@ -1,0 +1,15 @@
+{# หัวเอกสาร: ข้อมูลนิติบุคคล + ชื่อเอกสาร ใช้ร่วมกันระหว่างใบแจ้งหนี้และใบเสร็จ #}
+<div class="doc-head">
+  <div class="org">
+    <div class="org-name">{{ settings.condo_name }}</div>
+    {% if settings.address %}<div>{{ settings.address }}</div>{% endif %}
+    <div>
+      {% if settings.phone %}โทร {{ settings.phone }}{% endif %}
+      {% if settings.tax_id %}&nbsp; เลขประจำตัวผู้เสียภาษี {{ settings.tax_id }}{% endif %}
+    </div>
+  </div>
+  <div class="doc-title">
+    <div class="th">{{ doc_title_th }}</div>
+    <div class="en">{{ doc_title_en }}</div>
+  </div>
+</div>
