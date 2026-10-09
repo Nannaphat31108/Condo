@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-head no-print"><h1>หน้าทดสอบเครื่องพิมพ์</h1>
   <div class="actions"><a class="btn" href="{{ url_for('admin.printer') }}">กลับ</a><button class="btn btn-primary" onclick="window.print()">พิมพ์</button></div></div>
-<div class="bill print-test">
+<div class="bill print-test{{ ' bill--mono' if settings.print_mode == 'eco' }}">
   <img class="bill-logo" src="{{ settings.logo or url_for('static', filename='logo.png') }}" alt="">
   <h2>ทดสอบการพิมพ์ — {{ settings.condo_name }}</h2>
   <p>ถ้าเห็นหน้านี้บนกระดาษ A4 ครบทั้งกรอบ แปลว่าตั้งค่าเครื่องพิมพ์ถูกต้องแล้ว</p>

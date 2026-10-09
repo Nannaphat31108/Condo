@@ -487,4 +487,24 @@ def test_printing_options(app, client):
     assert bat.status_code == 200 and "--kiosk-printing" in body and "\r\n" in body and 'set "URL=http://localhost/"' in body
     assert client.get("/admin/printer/test?print=1").status_code == 200
     s.post("/admin/settings", {"condo_name": "x", "issue_day": "1", "due_days": "15", "print_mode": "eco"})
-    assert 'class="print-eco"' in client.get("/admin/printer").get_data(as_text=True)
+    with app.app_context():
+        inv_id = get_db().execute("SELECT id FROM invoices").fetchone()[0]
+    assert "bill--mono" in client.get(f"/admin/invoices/{inv_id}").get_data(as_text=True)
+
+
+def test_receipts_always_black_and_white(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/new", {"unit_no": "26/1", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE charge_types SET active=0 WHERE method LIKE 'meter%'")
+        db.commit()
+    s.post("/admin/billing", {"period": "2026-10"})
+    with app.app_context():
+        inv_id = get_db().execute("SELECT id FROM invoices").fetchone()[0]
+    s.post(f"/admin/invoices/{inv_id}/pay", {"amount": "280", "paid_at": "2026-10-05"})
+    # ค่าเริ่มต้น: ใบแจ้งหนี้สี, ใบเสร็จขาวดำ
+    assert "bill--mono" not in client.get(f"/admin/invoices/{inv_id}").get_data(as_text=True)
+    assert "bill--mono" in client.get("/admin/payments/1/receipt").get_data(as_text=True)
+    assert "bill--mono" in client.get("/admin/receipts/print?period=2026-10&layout=half").get_data(as_text=True)

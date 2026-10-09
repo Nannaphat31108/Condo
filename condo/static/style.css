@@ -310,19 +310,30 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 .print-test .swatches { display: flex; gap: .4rem; }
 .print-test .swatches span { width: 40px; height: 22px; border-radius: 4px; }
 
-/* โหมดประหยัดหมึก: ขาวดำ ไม่มีพื้นหลังสี */
-@media print {
-  .print-eco .bill { --b-main: #000; --b-accent: #000; --b-soft: #fff; --b-line: #555; --b-ink: #000; color: #000; }
-  .print-eco .bill-watermark { display: none; }
-  .print-eco .bill-logo { filter: grayscale(1); }
-  .print-eco .bill-title { background: #fff; color: #000; border: 2px solid #000; }
-  .print-eco .bill-room { background: #fff; }
-  .print-eco .bill-items th { background: #fff; color: #000; border-bottom: 1.5px solid #000; }
-  .print-eco .bill-items tbody tr:nth-child(even) td { background: #fff; }
-  .print-eco .bill-total-amount { background: #fff; color: #000; border: 2px solid #000; }
-  .print-eco .bill-total-amount .label { color: #333; }
-  .print-eco .invoice-pay { background: #fff; border: 1px solid #555; }
-  .print-eco .bill-items .flat { background: #fff; border: 1px solid #555; color: #000; }
-  .print-eco .bill-pay .box.on::before { background: #000; border-color: #000; }
-  .print-eco .print-test .swatches { display: none; }
-}
+/* ขาวดำ ประหยัดหมึก: ใบเสร็จทุกใบ และใบแจ้งหนี้เมื่อเลือกโหมดประหยัดหมึก
+   ไม่มีพื้นหลังสี ลายน้ำ หรือตัวอักษรสี เหลือเฉพาะเส้นและตัวหนังสือสีดำ */
+.bill--mono { --b-main: #000; --b-accent: #000; --b-soft: #fff; --b-line: #000; --b-ink: #000; color: #000; box-shadow: none; }
+.bill--mono::before, .bill--mono .bill-watermark { display: none; }
+.bill--mono .bill-logo { filter: grayscale(1) contrast(1.2); }
+.bill--mono .bill-head { border-bottom-width: 1.5px; }
+.bill--mono .bill-org, .bill--mono dt, .bill--mono .bill-room .label, .bill--mono .bill-total-words .label,
+.bill--mono .bill-items .item-meter, .bill--mono .bill-items .unit, .bill--mono .bill-note-line,
+.bill--mono .bill-signs .role, .bill--mono .bill-foot, .bill--mono .bill-pay .ref, .bill--mono .muted { color: #000; }
+.bill--mono .bill-title { background: #fff; color: #000; border: 1.5px solid #000; }
+.bill--mono .bill-room { background: #fff; border-color: #000; }
+.bill--mono .bill-items { border-color: #000; }
+.bill--mono .bill-items th { background: #fff; color: #000; border-bottom: 1.5px solid #000; }
+.bill--mono .bill-items td { border-bottom-color: #999; }
+.bill--mono .bill-items tbody tr:nth-child(even) td { background: #fff; }
+.bill--mono .bill-items tr.is-penalty .item-name, .bill--mono dd.due { color: #000; }
+.bill--mono .bill-items .flat { background: #fff; border: 1px solid #000; color: #000; }
+.bill--mono .bill-total-words { border: 1px solid #000; }
+.bill--mono .bill-total-amount { background: #fff; color: #000; border: 1.5px solid #000; }
+.bill--mono .bill-total-amount .label { color: #000; }
+.bill--mono .invoice-pay { background: #fff; border: 1px solid #000; }
+.bill--mono .bill-pay .box::before { border-color: #000; }
+.bill--mono .bill-pay .box.on { color: #000; }
+.bill--mono .bill-pay .box.on::before { background: #000; border-color: #000; }
+.bill--mono .bill-stamp { color: #000; border-color: #000; }
+.bill--mono .bill-foot { border-top-color: #000; }
+.bill--mono.print-test .swatches { display: none; }

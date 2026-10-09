@@ -5,7 +5,8 @@
 {%- set is_compact = compact is defined and compact -%}
 {%- set logo = settings.logo or url_for('static', filename='logo.png') -%}
 {%- set amount = p.amount if is_receipt else inv.total -%}
-<article class="bill {{ 'bill--receipt' if is_receipt else 'bill--invoice' }}{{ ' bill--compact' if is_compact }}">
+{%- set is_mono = is_receipt or settings.print_mode == 'eco' -%}
+<article class="bill {{ 'bill--receipt' if is_receipt else 'bill--invoice' }}{{ ' bill--compact' if is_compact }}{{ ' bill--mono' if is_mono }}">
   <img class="bill-watermark" src="{{ logo }}" alt="">
   <header class="bill-head">
     <img class="bill-logo" src="{{ logo }}" alt="โลโก้">

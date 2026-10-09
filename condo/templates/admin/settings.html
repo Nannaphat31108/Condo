@@ -38,9 +38,10 @@
       <h2 style="margin-top:1.5rem">การพิมพ์</h2>
       <div class="field"><label>รูปแบบการพิมพ์</label>
         <select name="print_mode">
-          <option value="color" {{ 'selected' if settings.print_mode != 'eco' }}>พิมพ์สี (สวยงาม)</option>
-          <option value="eco" {{ 'selected' if settings.print_mode == 'eco' }}>ประหยัดหมึก (ขาวดำ ไม่มีพื้นหลังสี)</option>
-        </select></div>
+          <option value="color" {{ 'selected' if settings.print_mode != 'eco' }}>ใบแจ้งหนี้พิมพ์สี</option>
+          <option value="eco" {{ 'selected' if settings.print_mode == 'eco' }}>ใบแจ้งหนี้ขาวดำ (ประหยัดหมึก)</option>
+        </select>
+        <div class="help">ใบเสร็จรับเงินพิมพ์ขาวดำเสมอเพื่อประหยัดหมึก</div></div>
       <div class="field"><label class="check"><input type="checkbox" name="auto_print_receipt" value="1" {{ 'checked' if settings.auto_print_receipt != '0' }}> รับชำระแล้วพิมพ์ใบเสร็จทันที</label></div>
       <p class="help">ตั้งค่าเครื่องพิมพ์ Epson L3350 ให้พิมพ์ได้ทันทีที่ <a href="{{ url_for('admin.printer') }}">ตั้งค่าเครื่องพิมพ์</a></p>
       <h2 style="margin-top:1.5rem">สำรองข้อมูล</h2>

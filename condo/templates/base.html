@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body class="{{ 'print-eco' if settings.print_mode == 'eco' }}">
+<body>
 {% if g.user %}
 <div class="topbar no-print">
   <strong>{{ settings.condo_name }}</strong>
