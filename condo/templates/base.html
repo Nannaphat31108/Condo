@@ -68,18 +68,72 @@ document.addEventListener('submit', function (e) {
   if (msg && !confirm(msg)) e.preventDefault();
 });
 </script>
+<div class="print-modal" id="print-modal" role="dialog" aria-modal="true" aria-labelledby="print-modal-title">
+  <form id="print-form">
+    <h2 id="print-modal-title">ตั้งค่าการพิมพ์</h2>
+    <div class="muted small" id="print-count"></div>
+    <div class="pp-options">
+      <label class="pp-option"><input type="radio" name="pp" value="1">
+        <div class="paper" style="grid-template-rows:1fr"><i></i></div>
+        <div class="t">1 ใบ ต่อหน้า</div><div class="sub" id="pp-sub-1"></div></label>
+      <label class="pp-option"><input type="radio" name="pp" value="2">
+        <div class="paper" style="grid-template-rows:1fr 1fr"><i></i><i></i></div>
+        <div class="t">2 ใบ ต่อหน้า</div><div class="sub" id="pp-sub-2"></div></label>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="print-cancel">ยกเลิก</button>
+      <button type="submit" class="btn btn-primary" id="print-go">พิมพ์</button>
+    </div>
+  </form>
+</div>
 <script>
-// เปิดหน้าพร้อม ?print=1 = สั่งพิมพ์ทันที (ถ้าเปิดผ่านไฟล์ condo-print.bat จะส่งเข้าเครื่องพิมพ์เลยโดยไม่ถาม)
-if (/[?&]print=1(&|$)/.test(location.search)) {
-  window.addEventListener('load', function () {
-    var imgs = Array.prototype.slice.call(document.images).filter(function (i) { return !i.complete; });
-    var go = function () { setTimeout(function () { window.print(); }, 250); };
-    if (!imgs.length) return go();
-    var left = imgs.length;
-    imgs.forEach(function (i) { i.addEventListener('load', done); i.addEventListener('error', done); });
-    function done() { if (--left === 0) go(); }
+// ก่อนพิมพ์: ให้เลือกจำนวนใบต่อหน้า A4 (จำค่าล่าสุดไว้) แล้วจึงส่งเข้าเครื่องพิมพ์
+(function () {
+  var KEY = 'condo.perPage', body = document.body, modal = document.getElementById('print-modal');
+  var form = document.getElementById('print-form');
+  function stored() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
+  function store(v) { try { localStorage.setItem(KEY, v); } catch (e) {} }
+  function apply(pp) {
+    body.classList.toggle('layout-half', pp === '2');
+    body.classList.toggle('layout-full', pp !== '2');
+  }
+  var fromUrl = (location.search.match(/[?&]layout=(half|full)/) || [])[1];
+  apply(fromUrl ? (fromUrl === 'half' ? '2' : '1') : (stored() || '1'));
+
+  window.condoPrint = function () {
+    var docs = document.querySelectorAll('.print-docs .sheet-slot').length;
+    if (!docs) { window.print(); return; }
+    var current = body.classList.contains('layout-half') ? '2' : '1';
+    form.pp.value = current;
+    document.getElementById('print-count').textContent = 'เอกสาร ' + docs + ' ใบ · กระดาษ A4';
+    document.getElementById('pp-sub-1').textContent = 'ใช้กระดาษ ' + docs + ' แผ่น';
+    document.getElementById('pp-sub-2').textContent = 'ใช้กระดาษ ' + Math.ceil(docs / 2) + ' แผ่น (ตัดครึ่ง)';
+    modal.classList.add('open');
+    document.getElementById('print-go').focus();
+  };
+  function close() { modal.classList.remove('open'); }
+  form.addEventListener('change', function () { apply(form.pp.value); });
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    apply(form.pp.value); store(form.pp.value); close();
+    setTimeout(function () { window.print(); }, 150);
   });
-}
+  document.getElementById('print-cancel').addEventListener('click', close);
+  modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && modal.classList.contains('open')) close(); });
+
+  // เปิดหน้าพร้อม ?print=1 (เช่น หลังรับชำระ) = เปิดหน้าต่างตั้งค่าการพิมพ์ทันที กด Enter เพื่อพิมพ์
+  if (/[?&]print=1(&|$)/.test(location.search)) {
+    window.addEventListener('load', function () {
+      var imgs = Array.prototype.slice.call(document.images).filter(function (i) { return !i.complete; });
+      var go = function () { setTimeout(window.condoPrint, 200); };
+      if (!imgs.length) return go();
+      var left = imgs.length;
+      imgs.forEach(function (i) { i.addEventListener('load', done); i.addEventListener('error', done); });
+      function done() { if (--left === 0) go(); }
+    });
+  }
+})();
 </script>
 {% block scripts %}{% endblock %}
 </body>

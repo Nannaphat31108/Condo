@@ -38,7 +38,6 @@
   <div class="actions">
     <button class="btn btn-primary" data-count>บันทึกรับชำระห้องที่เลือก</button>
     <label class="check"><input type="checkbox" name="print_receipt" value="1" {{ 'checked' if settings.auto_print_receipt != '0' }}> พิมพ์ใบเสร็จทันที</label>
-    <select name="layout" style="width:auto"><option value="full">1 ใบ ต่อ A4</option><option value="half">2 ใบ ต่อ A4</option></select>
   </div>
 </form>
 {% endif %}

@@ -968,8 +968,7 @@ def payments_bulk():
         if receipts and request.form.get("print_receipt"):
             ids = [r[0] for r in db.execute(
                 f"SELECT id FROM payments WHERE receipt_no IN ({','.join('?' * len(receipts))})", receipts)]
-            return redirect(url_for("admin.receipts_print", ids=",".join(map(str, ids)), print=1,
-                                    layout=request.form.get("layout", "full"), period=period))
+            return redirect(url_for("admin.receipts_print", ids=",".join(map(str, ids)), print=1, period=period))
         return redirect(url_for("admin.payments_bulk", period=period))
     return render_template("admin/payments_bulk.html", period=period, invoices=invoices_,
                            methods=PAYMENT_METHODS, today=date.today().isoformat())

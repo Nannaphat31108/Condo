@@ -3,12 +3,12 @@
 {% block content %}
 <div class="page-head no-print">
   <h1>พิมพ์ใบแจ้งหนี้งวด {{ period|period }} ({{ docs|length }} ฉบับ)</h1>
-  <div class="actions"><a class="btn" href="{{ url_for('admin.billing_page', period=period) }}">กลับ</a><button class="btn btn-primary" onclick="window.print()">พิมพ์ทั้งหมด</button></div>
+  <div class="actions"><a class="btn" href="{{ url_for('admin.billing_page', period=period) }}">กลับ</a><button class="btn btn-primary" onclick="condoPrint()">พิมพ์ทั้งหมด</button></div>
 </div>
+<div class="print-docs">
 {% for inv, items, payments, unit in docs %}
-  {% set mode = "invoice" %}{% include "_bill_doc.html" %}
-  {% if not loop.last %}<div class="page-break"></div>{% endif %}
-{% else %}
-  <div class="card">ไม่มีใบแจ้งหนี้ในงวดนี้</div>
+  <div class="sheet-slot">{% set mode = "invoice" %}{% include "_bill_doc.html" %}</div>
 {% endfor %}
+</div>
+{% if not docs %}<div class="card">ไม่มีใบแจ้งหนี้ในงวดนี้</div>{% endif %}
 {% endblock %}

@@ -5,7 +5,7 @@
   <h1>พิมพ์ใบเสร็จ {{ 'รับเงินเดือน' if by == 'paid' else 'งวด' }} {{ period|period }} ({{ docs|length }} ใบ)</h1>
   <div class="actions">
     <a class="btn" href="{{ url_for('admin.billing_page', period=period) }}">กลับ</a>
-    <button class="btn btn-primary" onclick="window.print()">พิมพ์ทั้งหมด</button>
+    <button class="btn btn-primary" onclick="condoPrint()">พิมพ์ทั้งหมด</button>
   </div>
 </div>
 <div class="card no-print">
@@ -13,16 +13,13 @@
     <div class="field"><label>เดือน</label><input type="month" name="period" value="{{ period }}"></div>
     <div class="field"><label>เลือกใบเสร็จตาม</label>
       <select name="by"><option value="invoice" {{ 'selected' if by == 'invoice' }}>งวดของใบแจ้งหนี้</option><option value="paid" {{ 'selected' if by == 'paid' }}>วันที่รับเงิน</option></select></div>
-    <div class="field"><label>รูปแบบกระดาษ</label>
-      <select name="layout"><option value="full" {{ 'selected' if layout == 'full' }}>1 ใบ ต่อ A4</option><option value="half" {{ 'selected' if layout == 'half' }}>2 ใบ ต่อ A4 (ประหยัดกระดาษ)</option></select></div>
     <button class="btn">แสดง</button>
   </form>
 </div>
-{% set compact = layout == 'half' %}
+<div class="print-docs">
 {% for p, inv, items, unit in docs %}
-  <div class="{{ 'half-sheet' if compact }}">{% set mode = "receipt" %}{% include "_bill_doc.html" %}</div>
-  {% if not loop.last and (not compact or loop.index is even) %}<div class="page-break"></div>{% endif %}
-{% else %}
-  <div class="card">ไม่มีใบเสร็จในเดือนนี้</div>
+  <div class="sheet-slot">{% set mode = "receipt" %}{% include "_bill_doc.html" %}</div>
 {% endfor %}
+</div>
+{% if not docs %}<div class="card">ไม่มีใบเสร็จในเดือนนี้</div>{% endif %}
 {% endblock %}

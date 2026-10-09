@@ -5,8 +5,8 @@
   <h1>ใบเสร็จรับเงิน {{ p.receipt_no }}</h1>
   <div class="actions">
     <a class="btn" href="{{ url_for('admin.invoice_detail' if g.user.role == 'admin' else 'resident.invoice', invoice_id=inv.id) }}">กลับไปที่ใบแจ้งหนี้</a>
-    <button class="btn btn-primary" onclick="window.print()">พิมพ์</button>
+    <button class="btn btn-primary" onclick="condoPrint()">พิมพ์</button>
   </div>
 </div>
-{% set mode = "receipt" %}{% include "_bill_doc.html" %}
+<div class="print-docs"><div class="sheet-slot">{% set mode = "receipt" %}{% include "_bill_doc.html" %}</div></div>
 {% endblock %}

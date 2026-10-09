@@ -305,7 +305,7 @@ def test_generate_rooms_bulk_payment_and_receipt_print(app, client):
         r = client.get(url)
         assert r.status_code == 200, url
     page = client.get("/admin/receipts/print?period=2026-10&layout=half").get_data(as_text=True)
-    assert page.count('class="half-sheet"') == 4 and "0004/10/2026" in page
+    assert page.count('class="sheet-slot"') == 4 and "0004/10/2026" in page
 
 
 def test_example_settings_migrate_and_meter_dates(app, client):
@@ -479,7 +479,8 @@ def test_printing_options(app, client):
     loc = r.headers["Location"]
     assert "/admin/receipts/print" in loc and "ids=" in loc and "print=1" in loc
     page = client.get(loc).get_data(as_text=True)
-    assert page.count('class="half-sheet"') == 1 and "0002/10/2026" in page
+    assert page.count('class="sheet-slot"') == 1 and "0002/10/2026" in page
+    assert 'id="print-modal"' in page
     # หน้าตั้งค่าเครื่องพิมพ์ ไฟล์ .bat และโหมดประหยัดหมึก
     assert "L3350" in client.get("/admin/printer").get_data(as_text=True)
     bat = client.get("/admin/printer/shortcut.bat")

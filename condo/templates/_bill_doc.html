@@ -1,12 +1,11 @@
 {#- เอกสารใบแจ้งหนี้ / ใบเสร็จรับเงิน
     ต้องมี: mode ('invoice' | 'receipt'), inv, items, unit; ใบเสร็จต้องมี p (การชำระเงิน)
-    ไม่บังคับ: compact (พิมพ์ 2 ใบต่อ A4) -#}
+    จำนวนใบต่อแผ่น (1 หรือ 2 ต่อ A4) เลือกในหน้าต่างตั้งค่าการพิมพ์ก่อนพิมพ์ -#}
 {%- set is_receipt = mode == 'receipt' -%}
-{%- set is_compact = compact is defined and compact -%}
 {%- set logo = settings.logo or url_for('static', filename='logo.png') -%}
 {%- set amount = p.amount if is_receipt else inv.total -%}
 {%- set is_mono = is_receipt or settings.print_mode == 'eco' -%}
-<article class="bill {{ 'bill--receipt' if is_receipt else 'bill--invoice' }}{{ ' bill--compact' if is_compact }}{{ ' bill--mono' if is_mono }}">
+<article class="bill {{ 'bill--receipt' if is_receipt else 'bill--invoice' }}{{ ' bill--mono' if is_mono }}">
   <img class="bill-watermark" src="{{ logo }}" alt="">
   <header class="bill-head">
     <img class="bill-logo" src="{{ logo }}" alt="โลโก้">
