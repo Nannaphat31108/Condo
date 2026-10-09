@@ -57,7 +57,7 @@ python run.py
 ฐานข้อมูลเก็บอยู่ที่ `instance/condo.sqlite3` (ไฟล์เดียว สำรองง่าย) เปลี่ยนตำแหน่งได้ด้วยตัวแปร `CONDO_DATABASE`
 
 ให้เครื่องอื่นในวงแลนเข้าใช้ได้: `HOST=0.0.0.0 python run.py`
-ถ้าจะเปิดใช้งานจริงผ่านอินเทอร์เน็ต ควรรันผ่าน WSGI server เช่น `waitress-serve --call condo:create_app` หรือ `gunicorn "condo:create_app()"` และใช้ HTTPS
+จะเปิดใช้งานจริงเป็นเว็บผ่านอินเทอร์เน็ตบน Render ดูขั้นตอนที่ [DEPLOY_RENDER.md](DEPLOY_RENDER.md)
 
 ## ขั้นตอนการทำงานแต่ละเดือน
 

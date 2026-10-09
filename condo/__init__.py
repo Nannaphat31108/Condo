@@ -12,10 +12,15 @@ def create_app(test_config=None):
     app.config.from_mapping(
         SECRET_KEY=os.environ.get("CONDO_SECRET_KEY"),
         DATABASE=os.environ.get("CONDO_DATABASE", os.path.join(app.instance_path, "condo.sqlite3")),
+        # บนเซิร์ฟเวอร์ที่ใช้ HTTPS (เช่น Render) ให้ส่ง cookie ผ่าน HTTPS เท่านั้น
+        SESSION_COOKIE_SECURE=bool(os.environ.get("RENDER") or os.environ.get("CONDO_HTTPS")),
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
     )
     if test_config:
         app.config.update(test_config)
     os.makedirs(app.instance_path, exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(app.config["DATABASE"])), exist_ok=True)
 
     if not app.config["SECRET_KEY"]:
         # เก็บ secret key ไว้ในโฟลเดอร์ instance เพื่อให้ session ไม่หลุดเมื่อรีสตาร์ท

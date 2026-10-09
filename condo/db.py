@@ -1,5 +1,6 @@
 """ฐานข้อมูล SQLite: การเชื่อมต่อ, สร้างตาราง และข้อมูลเริ่มต้น"""
 import json
+import os
 import sqlite3
 
 from flask import current_app, g
@@ -209,7 +210,7 @@ def init_db(db):
     if db.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
         db.execute(
             "INSERT INTO users (username, password_hash, full_name, role) VALUES (?, ?, ?, 'admin')",
-            ("admin", generate_password_hash("admin123"), "ผู้ดูแลระบบ"),
+            ("admin", generate_password_hash(os.environ.get("CONDO_ADMIN_PASSWORD") or "admin123"), "ผู้ดูแลระบบ"),
         )
     if db.execute("SELECT COUNT(*) FROM charge_types").fetchone()[0] == 0:
         for ct in DEFAULT_CHARGE_TYPES:

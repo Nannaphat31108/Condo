@@ -1,0 +1,22 @@
+# Render Blueprint: สร้างเว็บพร้อมดิสก์เก็บฐานข้อมูลถาวร
+# ใช้งาน: Render Dashboard > New > Blueprint > เลือก repo นี้
+services:
+  - type: web
+    name: condo
+    runtime: python
+    plan: starter            # ต้องเป็นแบบเสียเงิน จึงต่อดิสก์ถาวรได้ (แบบ free ข้อมูลหายเมื่อรีสตาร์ท)
+    buildCommand: pip install -r requirements.txt
+    # 1 worker หลาย thread เหมาะกับ SQLite
+    startCommand: gunicorn "condo:create_app()" --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 60
+    healthCheckPath: /login
+    envVars:
+      - key: CONDO_DATABASE
+        value: /var/data/condo.sqlite3
+      - key: CONDO_SECRET_KEY
+        generateValue: true
+      - key: CONDO_ADMIN_PASSWORD   # รหัสผ่าน admin ครั้งแรก — กรอกเองตอนสร้าง
+        sync: false
+    disk:
+      name: condo-data
+      mountPath: /var/data
+      sizeGB: 1
