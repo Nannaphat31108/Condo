@@ -13,7 +13,8 @@
   {% for k, v in UNIT_TYPE_LABELS.items() %}<a href="{{ url_for('admin.sheet', type=k, period=period) }}" class="{{ 'on' if unit_type == k }}">{{ v }} ({{ counts.get(k, 0) }})</a>{% endfor %}
 </div>
 <p class="muted small">เห็นทุกรายการของทุก{{ 'ร้าน' if unit_type == 'shop' else 'ห้อง' }}ในหน้าเดียว — กรอกเลขมิเตอร์ {% if cols|selectattr('kind', 'equalto', 'manual')|list %}ค่าเช่า {% endif %}เบี้ยปรับ และรายการอื่น ๆ แล้วกด
-  <b>บันทึก</b> หรือ <b>บันทึกและออกใบแจ้งหนี้</b> ยอดรวมคำนวณให้ทันทีขณะพิมพ์ · ห้องที่ออกบิลแล้วแก้ได้เฉพาะเบี้ยปรับ</p>
+  <b>บันทึก</b> หรือ <b>บันทึกและออกใบแจ้งหนี้</b> ยอดรวมคำนวณให้ทันทีขณะพิมพ์<br>
+  <b>☑ ติ๊กเฉพาะรายการที่ห้องนี้ต้องจ่าย</b> — เอาติ๊กออก = ไม่เรียกเก็บเดือนนี้ (เช่น จ่ายค่าน้ำมาแล้ว) · ห้องที่ออกบิลแล้วแต่ยังไม่ชำระครบ ติ๊กเพิ่ม/เอาออกได้ ยอดบิลคำนวณใหม่ให้</p>
 
 {% if not rows %}
   <div class="flash info">ยังไม่มี{{ UNIT_TYPE_LABELS[unit_type] }} —
@@ -54,35 +55,43 @@
     <tbody>
     {% for row in rows %}{% set u = row.unit %}{% set inv = row.inv %}{% set uid = u.id %}
       <tr data-find="{{ u.unit_no }} {{ u.owner_name }} {{ u.tenant_name }}" class="{{ 'billed' if inv }}">
-        <td class="sticky"><b>{{ u.unit_no }}</b><div class="who">{{ u.tenant_name or u.owner_name }}</div></td>
+        <td class="sticky"><b>{{ u.unit_no }}</b><div class="who">{{ u.tenant_name or u.owner_name }}</div>
+          {% if row.editable %}<input type="hidden" name="row_{{ uid }}" value="1">{% endif %}</td>
         {% for col in cols %}{% set ct = col.ct %}{% set c = row.cells[ct.id] %}
-          {% if inv %}
-            <td class="num">{% if c %}{{ (c.amount + c.vat_amount)|baht }}{% if c.meter_curr is not none %}<div class="who">{{ c.meter_prev|num }} → {{ c.meter_curr|num }}</div>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
-          {% elif col.kind == 'meter' %}
-            <td class="meter" data-method="{{ ct.method }}" data-rate="{{ ct.rate }}" data-min="{{ ct.min_charge }}" data-fee="{{ ct.fixed_fee }}" data-vat="{{ ct.vat_percent }}" data-tiers="{{ ct.tiers }}">
-              {% if c.applies %}
-              <div class="mpair">
-                <input class="cell mprev" type="number" step="0.01" name="prev_{{ ct.id }}_{{ uid }}" value="{{ c.prev|num|replace(',', '') }}" title="เลขครั้งก่อน">
-                <input class="cell mcurr" type="number" step="0.01" name="curr_{{ ct.id }}_{{ uid }}" value="{{ (c.curr|num|replace(',', '')) if c.curr is not none }}" placeholder="ครั้งนี้" title="เลขครั้งนี้">
-              </div>
-              <div class="who"><span class="use"></span> <b class="amt"></b></div>
-              {% else %}<span class="muted">—</span>{% endif %}
-            </td>
-          {% elif col.kind == 'manual' %}
-            <td class="num"><input class="cell money" type="number" step="0.01" min="0" name="amt_{{ ct.id }}_{{ uid }}" value="{{ '%.2f'|format(c.amount) if c.amount }}" data-vat="{{ ct.vat_percent }}"></td>
-          {% else %}
-            <td class="num auto" data-amount="{{ (c.amount * (1 + ct.vat_percent / 100)) if c.applies else 0 }}">{{ c.amount|baht if c.applies else '—' }}</td>
-          {% endif %}
+          {% set live_meter = col.kind == 'meter' and not inv and c.applies %}
+          <td class="chg{{ ' num' if not live_meter }}{{ ' meter' if live_meter }}{{ ' off' if c.applies and not c.included }}"
+              data-amount="{{ c.amount or 0 }}"
+              {% if live_meter %}data-method="{{ ct.method }}" data-rate="{{ ct.rate }}" data-min="{{ ct.min_charge }}" data-fee="{{ ct.fixed_fee }}" data-vat="{{ ct.vat_percent }}" data-tiers="{{ ct.tiers }}"{% endif %}>
+            {% if not c.applies %}<span class="muted">—</span>
+            {% else %}
+              {% if row.editable %}<label class="inc-box" title="ติ๊กออก = ห้องนี้ไม่ต้องจ่าย{{ ct.name }}เดือนนี้"><input type="checkbox" class="inc" name="inc_{{ ct.id }}_{{ uid }}" value="1" {{ 'checked' if c.included }}></label>
+                {%- if not inv %}<input type="hidden" name="has_{{ ct.id }}_{{ uid }}" value="1">{% endif %}{% endif %}
+              {% if inv %}
+                <span class="amt-text">{{ c.amount|baht if c.amount is not none else 'รอจดมิเตอร์' }}</span>
+                {% if c.item and c.item.meter_curr is not none %}<div class="who">{{ c.item.meter_prev|num }} → {{ c.item.meter_curr|num }}</div>{% endif %}
+              {% elif live_meter %}
+                <div class="mpair">
+                  <input class="cell mprev" type="number" step="0.01" name="prev_{{ ct.id }}_{{ uid }}" value="{{ c.prev|num|replace(',', '') }}" title="เลขครั้งก่อน">
+                  <input class="cell mcurr" type="number" step="0.01" name="curr_{{ ct.id }}_{{ uid }}" value="{{ (c.curr|num|replace(',', '')) if c.curr is not none }}" placeholder="ครั้งนี้" title="เลขครั้งนี้">
+                </div>
+                <div class="who"><span class="use"></span> <b class="amt"></b></div>
+              {% elif col.kind == 'manual' %}
+                <input class="cell money" type="number" step="0.01" min="0" name="amt_{{ ct.id }}_{{ uid }}" value="{{ '%.2f'|format(c.amount) if c.amount }}" data-vat="{{ ct.vat_percent }}">
+              {% else %}
+                <span class="amt-text">{{ c.amount|baht }}</span>
+              {% endif %}
+            {% endif %}
+          </td>
         {% endfor %}
         {% for t in penalty_types %}{% set v = row.penalties.get(t) %}
-          <td class="num">{% if not inv or inv.status in ('unpaid', 'partial') %}<input class="cell money pen" type="number" step="0.01" min="0" name="pen_{{ loop.index0 }}_{{ uid }}" value="{{ '%.2f'|format(v) if v }}">{% else %}{{ v|baht if v else '—' }}{% endif %}</td>
+          <td class="num extra" data-amount="{{ v or 0 }}">{% if row.editable %}<input class="cell money pen" type="number" step="0.01" min="0" name="pen_{{ loop.index0 }}_{{ uid }}" value="{{ '%.2f'|format(v) if v }}">{% else %}{{ v|baht if v else '—' }}{% endif %}</td>
         {% endfor %}
-        <td>{% if inv %}<span class="num-text">{{ row.other.amount|baht if row.other.amount else '—' }}</span>
+        <td class="extra" data-amount="{{ row.other.amount or 0 }}">{% if inv %}<span class="num-text">{{ row.other.amount|baht if row.other.amount else '—' }}</span>
             {% else %}<div class="mpair"><input class="cell desc" type="text" name="othd_{{ uid }}" value="{{ row.other.description }}" placeholder="รายการ"><input class="cell money" type="number" step="0.01" name="oth_{{ uid }}" value="{{ '%.2f'|format(row.other.amount) if row.other.amount }}"></div>{% endif %}</td>
         <td>{% if inv %}<a href="{{ url_for('admin.invoice_detail', invoice_id=inv.id) }}">{{ status_badge(inv.status) }}</a>
             {% elif row.missing %}<span class="badge partial" title="{{ row.missing|join(', ') }}">รอจดมิเตอร์</span>
             {% else %}<span class="badge off">ยังไม่ออกบิล</span>{% endif %}</td>
-        <td class="num total sticky-r" data-billed="{{ row.total if inv else '' }}"><b>{{ row.total|baht }}</b></td>
+        <td class="num total sticky-r"><b>{{ row.total|baht }}</b></td>
       </tr>
     {% endfor %}
     </tbody>
@@ -129,33 +138,37 @@
     td.querySelector('.amt').textContent = fmt(amt);
     return amt * (1 + num(d.vat) / 100);
   }
+  // ยอดของแถว: รวมเฉพาะรายการที่ติ๊กไว้ + เบี้ยปรับ + อื่น ๆ
   function rowTotal(tr) {
-    var cell = tr.querySelector('.total');
-    if (cell.dataset.billed !== '') {
-      var t = num(cell.dataset.billed);
-      return t;
-    }
     var sum = 0;
-    tr.querySelectorAll('td.auto').forEach(function (td) { sum += num(td.dataset.amount); });
-    tr.querySelectorAll('td.meter').forEach(function (td) { sum += meterAmount(td); });
-    tr.querySelectorAll('input.money').forEach(function (i) { sum += num(i.value) * (1 + num(i.dataset.vat) / 100); });
-    cell.innerHTML = '<b>' + fmt(sum) + '</b>';
+    tr.querySelectorAll('td.chg').forEach(function (td) {
+      var inc = td.querySelector('input.inc');
+      td.classList.toggle('off', !!inc && !inc.checked);
+      if (inc && !inc.checked) { if (td.classList.contains('meter')) meterAmount(td); return; }
+      if (td.classList.contains('meter')) { sum += meterAmount(td); return; }
+      var money = td.querySelector('input.money');
+      sum += money ? num(money.value) * (1 + num(money.dataset.vat) / 100) : num(td.dataset.amount);
+    });
+    tr.querySelectorAll('td.extra').forEach(function (td) {
+      var money = td.querySelector('input.money');
+      sum += money ? num(money.value) : num(td.dataset.amount);
+    });
+    sum = Math.round(sum * 100) / 100;
+    tr.dataset.total = sum;
+    tr.querySelector('.total').innerHTML = '<b>' + fmt(sum) + '</b>';
     return sum;
   }
   function grand() {
     var g = 0;
-    form.querySelectorAll('tbody tr').forEach(function (tr) { g += rowTotal(tr); });
+    form.querySelectorAll('tbody tr').forEach(function (tr) { g += num(tr.dataset.total); });
     document.getElementById('grand').textContent = fmt(g);
   }
-  form.addEventListener('input', function (e) {
-    var tr = e.target.closest('tr');
-    if (tr) rowTotal(tr);
-    var g = 0;
-    form.querySelectorAll('tbody tr').forEach(function (r) {
-      var c = r.querySelector('.total'); g += c.dataset.billed !== '' ? num(c.dataset.billed) : num(c.textContent.replace(/,/g, ''));
-    });
-    document.getElementById('grand').textContent = fmt(g);
-  });
+  function changed(e) {
+    var tr = e.target.closest('tbody tr');
+    if (tr) { rowTotal(tr); grand(); }
+  }
+  form.addEventListener('input', changed);
+  form.addEventListener('change', changed);
   // Enter = ลงไปช่องเดียวกันของแถวถัดไป (จดมิเตอร์ได้เร็ว)
   form.addEventListener('keydown', function (e) {
     if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
@@ -175,6 +188,7 @@
     var q = this.value.trim().toLowerCase();
     form.querySelectorAll('tbody tr').forEach(function (tr) { tr.style.display = !q || tr.dataset.find.toLowerCase().indexOf(q) >= 0 ? '' : 'none'; });
   });
+  form.querySelectorAll('tbody tr').forEach(rowTotal);
   grand();
 })();
 </script>

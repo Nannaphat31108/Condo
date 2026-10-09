@@ -676,6 +676,16 @@ def sheet_columns(db, unit_type):
     return cols
 
 
+def set_exclusion(db, unit_id, period, charge_type_id, excluded):
+    """ติ๊กออก = ไม่เรียกเก็บค่าบริการนี้จากห้องนี้ในงวดนี้"""
+    if excluded:
+        db.execute("INSERT OR IGNORE INTO bill_exclusions (unit_id, period, charge_type_id) VALUES (?,?,?)",
+                   (unit_id, period, charge_type_id))
+    else:
+        db.execute("DELETE FROM bill_exclusions WHERE unit_id=? AND period=? AND charge_type_id=?",
+                   (unit_id, period, charge_type_id))
+
+
 def upsert_adhoc(db, unit_id, period, kind, description, amount):
     """รายการที่ยังไม่ออกบิล (เบี้ยปรับ / อื่น ๆ) จากหน้ากรอกรวม: 0 หรือว่าง = ลบ"""
     if kind == "penalty":
@@ -715,14 +725,44 @@ def sheet():
         for unit in units_:
             uid = unit["id"]
             inv = invoices_.get(uid)
+            if not f.get(f"row_{uid}"):
+                continue  # แถวที่แก้ไขไม่ได้ (บิลชำระครบแล้ว)
             if inv:
-                # ออกบิลแล้ว: แก้ได้เฉพาะเบี้ยปรับ (ถ้ายังไม่ชำระครบ)
-                if billing.invoice_editable(inv):
-                    for idx, name in enumerate(penalty_types):
-                        raw = f.get(f"pen_{idx}_{uid}")
-                        if raw is not None and billing.set_penalty(db, inv["id"], name, to_float(raw)):
-                            changed += 1
+                # ออกบิลแล้ว (ยังไม่ชำระครบ): ติ๊กเพิ่ม/เอาออกรายการ และแก้เบี้ยปรับ
+                db.execute("SAVEPOINT sheet_row")
+                have = {it["charge_type_id"]: it for it in db.execute(
+                    "SELECT * FROM invoice_items WHERE invoice_id=? AND charge_type_id IS NOT NULL", (inv["id"],))}
+                for col in cols:
+                    ct = col["ct"]
+                    want = bool(f.get(f"inc_{ct['id']}_{uid}"))
+                    if want and ct["id"] not in have:
+                        item = billing.charge_item(db, ct, unit, period, selections)
+                        if item is None:
+                            errors.append(f"{unit['unit_no']} {ct['name']}: ยังไม่ได้จดมิเตอร์ จึงเพิ่มในบิลไม่ได้")
+                            continue
+                        billing.insert_item(db, inv["id"], item)
+                        set_exclusion(db, uid, period, ct["id"], False)
+                        changed += 1
+                    elif not want and ct["id"] in have:
+                        db.execute("DELETE FROM invoice_items WHERE id=?", (have[ct["id"]]["id"],))
+                        set_exclusion(db, uid, period, ct["id"], True)
+                        changed += 1
+                for idx, name in enumerate(penalty_types):
+                    raw = f.get(f"pen_{idx}_{uid}")
+                    if raw is not None and billing.set_penalty(db, inv["id"], name, to_float(raw)):
+                        changed += 1
+                billing.renumber_items(db, inv["id"])
+                billing.recalc_invoice(db, inv["id"])
+                fresh = db.execute("SELECT total, paid_amount FROM invoices WHERE id=?", (inv["id"],)).fetchone()
+                if fresh["total"] + 0.005 < fresh["paid_amount"]:
+                    db.execute("ROLLBACK TO sheet_row")
+                    errors.append(f"{unit['unit_no']}: ยอดบิลหลังแก้จะน้อยกว่าที่ชำระแล้ว ({fresh['paid_amount']:,.2f}) ยังไม่บันทึก")
+                db.execute("RELEASE sheet_row")
                 continue
+            for col in cols:
+                ct = col["ct"]
+                if f.get(f"has_{ct['id']}_{uid}"):
+                    set_exclusion(db, uid, period, ct["id"], not f.get(f"inc_{ct['id']}_{uid}"))
             for col in cols:
                 ct = col["ct"]
                 if col["kind"] == "meter":
@@ -786,14 +826,17 @@ def sheet():
         key = (a["unit_id"], a["description"]) if a["kind"] == "penalty" else (a["unit_id"], a["kind"])
         pending[key] = a
     all_cts = db.execute("SELECT * FROM charge_types ORDER BY sort_order, id").fetchall()
+    exclusions = {(r["unit_id"], r["charge_type_id"]) for r in db.execute(
+        "SELECT * FROM bill_exclusions WHERE period=?", (period,))}
     rows = []
     for unit in units_:
         uid = unit["id"]
         inv = invoices_.get(uid)
-        row = {"unit": unit, "inv": inv, "cells": {}, "penalties": {}, "other": None}
+        editable = inv is None or billing.invoice_editable(inv)
+        row = {"unit": unit, "inv": inv, "editable": editable, "cells": {}, "penalties": {}, "other": None}
+        by_ct = {}
         if inv:
             items = db.execute("SELECT * FROM invoice_items WHERE invoice_id=?", (inv["id"],)).fetchall()
-            by_ct = {}
             for it in items:
                 if it["charge_type_id"]:
                     by_ct[it["charge_type_id"]] = it
@@ -801,28 +844,32 @@ def sheet():
                     row["penalties"][it["description"]] = it["amount"]
             other = sum(it["amount"] for it in items if not it["charge_type_id"] and it["kind"] != "penalty")
             row["other"] = {"amount": other}
-            for col in cols:
-                row["cells"][col["ct"]["id"]] = by_ct.get(col["ct"]["id"])
             row["total"] = inv["total"]
-        else:
-            for col in cols:
-                ct = col["ct"]
-                sel = selections.get(ct["id"], {})
-                if col["kind"] == "meter":
-                    r = readings[ct["id"]]
-                    cur = r["current"].get(uid)
-                    applies = billing.charge_applies(ct, period, unit, sel)
-                    row["cells"][ct["id"]] = {
-                        "applies": applies,
-                        "prev": cur["prev_reading"] if cur else r["last"].get(uid, 0),
-                        "curr": cur["curr_reading"] if cur else None,
-                    }
-                elif col["kind"] == "manual":
-                    row["cells"][ct["id"]] = {"applies": True, "amount": sel.get(uid)}
-                else:
-                    applies = billing.charge_applies(ct, period, unit, sel)
-                    amount = billing.compute_item(ct, unit, None, sel.get(uid))["amount"] if applies else None
-                    row["cells"][ct["id"]] = {"applies": applies, "amount": amount}
+        for col in cols:
+            ct = col["ct"]
+            sel = selections.get(ct["id"], {})
+            applies = col["kind"] == "manual" or billing.charge_applies(ct, period, unit, sel)
+            cell = {"applies": applies, "included": (uid, ct["id"]) not in exclusions, "amount": None}
+            if inv:
+                item = by_ct.get(ct["id"])
+                cell.update(item=item, included=item is not None, applies=applies or item is not None)
+                if item:
+                    cell["amount"] = item["amount"] + item["vat_amount"]
+                elif applies and col["kind"] != "manual":
+                    est = billing.charge_item(db, ct, unit, period, selections)  # ยอดถ้าติ๊กเพิ่มกลับ
+                    cell["amount"] = est["amount"] + est["vat_amount"] if est else None
+            elif col["kind"] == "meter":
+                r = readings[ct["id"]]
+                cur = r["current"].get(uid)
+                cell.update(prev=cur["prev_reading"] if cur else r["last"].get(uid, 0),
+                            curr=cur["curr_reading"] if cur else None)
+            elif col["kind"] == "manual":
+                cell["amount"] = sel.get(uid)
+            elif applies:
+                item = billing.compute_item(ct, unit, None, sel.get(uid))
+                cell["amount"] = item["amount"] + item["vat_amount"]
+            row["cells"][ct["id"]] = cell
+        if not inv:
             for name in penalty_types:
                 a = pending.get((uid, name))
                 row["penalties"][name] = a["amount"] if a else None

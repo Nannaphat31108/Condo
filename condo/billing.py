@@ -186,30 +186,45 @@ def next_number(db, table, column, period):
     return f"{seq:04d}{suffix}"
 
 
+def charge_item(db, ct, unit, period, selections):
+    """รายการของค่าบริการ 1 ตัวสำหรับห้องนี้ คืน item หรือ None ถ้าเป็นค่ามิเตอร์ที่ยังไม่ได้จด"""
+    sel = selections.get(ct["id"], {})
+    reading = None
+    if ct["method"] in METER_METHODS:
+        reading = db.execute(
+            "SELECT * FROM meter_readings WHERE charge_type_id=? AND unit_id=? AND period=?",
+            (ct["id"], unit["id"], period),
+        ).fetchone()
+        if reading is None:
+            return None
+    item = compute_item(ct, unit, reading, sel.get(unit["id"]))
+    if reading is not None:
+        prev = db.execute(
+            "SELECT read_date, recorded_at FROM meter_readings WHERE charge_type_id=? AND unit_id=? AND period<?"
+            " ORDER BY period DESC LIMIT 1", (ct["id"], unit["id"], period),
+        ).fetchone()
+        item["meter_curr_date"] = reading["read_date"] or reading["recorded_at"][:10]
+        item["meter_prev_date"] = (prev["read_date"] or prev["recorded_at"][:10]) if prev else None
+    return item
+
+
+def load_exclusions(db, unit_id, period):
+    """ค่าบริการที่ติ๊กออกสำหรับห้องนี้ในงวดนี้ (ไม่เรียกเก็บ เช่น จ่ายค่าน้ำมาแล้ว)"""
+    return {r[0] for r in db.execute(
+        "SELECT charge_type_id FROM bill_exclusions WHERE unit_id=? AND period=?", (unit_id, period))}
+
+
 def build_unit_items(db, unit, period, charge_types, selections):
     """สร้างรายการทั้งหมดของห้องในงวดนั้น คืน (items, missing_meters, adhoc_ids)"""
     items, missing = [], []
+    excluded = load_exclusions(db, unit["id"], period)
     for ct in charge_types:
-        sel = selections.get(ct["id"], {})
-        if not charge_applies(ct, period, unit, sel):
+        if ct["id"] in excluded or not charge_applies(ct, period, unit, selections.get(ct["id"], {})):
             continue
-        reading = None
-        if ct["method"] in METER_METHODS:
-            reading = db.execute(
-                "SELECT * FROM meter_readings WHERE charge_type_id=? AND unit_id=? AND period=?",
-                (ct["id"], unit["id"], period),
-            ).fetchone()
-            if reading is None:
-                missing.append(ct["name"])
-                continue
-        item = compute_item(ct, unit, reading, sel.get(unit["id"]))
-        if reading is not None:
-            prev = db.execute(
-                "SELECT read_date, recorded_at FROM meter_readings WHERE charge_type_id=? AND unit_id=? AND period<?"
-                " ORDER BY period DESC LIMIT 1", (ct["id"], unit["id"], period),
-            ).fetchone()
-            item["meter_curr_date"] = reading["read_date"] or reading["recorded_at"][:10]
-            item["meter_prev_date"] = (prev["read_date"] or prev["recorded_at"][:10]) if prev else None
+        item = charge_item(db, ct, unit, period, selections)
+        if item is None:
+            missing.append(ct["name"])
+            continue
         items.append(item)
 
     adhoc = db.execute(
@@ -308,6 +323,16 @@ def void_invoice(db, invoice_id):
 
 def invoice_editable(inv):
     return inv is not None and inv["status"] in ("unpaid", "partial")
+
+
+def renumber_items(db, invoice_id):
+    """เรียงลำดับรายการในบิลใหม่ตามลำดับค่าบริการ (หลังเพิ่ม/ลบรายการ)"""
+    rows = db.execute(
+        "SELECT ii.id FROM invoice_items ii LEFT JOIN charge_types c ON c.id=ii.charge_type_id WHERE ii.invoice_id=?"
+        " ORDER BY COALESCE(c.sort_order, CASE ii.kind WHEN 'penalty' THEN 950 ELSE 900 END), ii.id",
+        (invoice_id,)).fetchall()
+    for order, row in enumerate(rows):
+        db.execute("UPDATE invoice_items SET sort_order=? WHERE id=?", (order, row["id"]))
 
 
 def recalc_invoice(db, invoice_id):

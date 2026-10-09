@@ -358,3 +358,10 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 .pp-option .sub { font-size: .8rem; color: var(--muted); }
 .print-modal .actions { justify-content: flex-end; }
 @media print { .print-modal { display: none !important; } }
+.sheet td.chg { position: relative; }
+.sheet .inc-box { position: absolute; top: 3px; left: 3px; margin: 0; line-height: 1; }
+.sheet .inc-box input { width: 15px; height: 15px; margin: 0; cursor: pointer; }
+.sheet td.chg:has(.inc-box) { padding-left: 1.6rem; }
+.sheet td.chg.off .amt-text, .sheet td.chg.off .amt, .sheet td.chg.off .use { text-decoration: line-through; color: var(--muted); }
+.sheet td.chg.off { background: #fbf3f2; }
+.sheet td.chg.off input.cell:not(.mprev):not(.mcurr) { opacity: .5; }

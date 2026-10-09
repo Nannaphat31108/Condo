@@ -96,6 +96,35 @@ def client(app):
     return app.test_client()
 
 
+class _FormParser(__import__("html.parser").parser.HTMLParser):
+    """เก็บค่าฟอร์มแบบที่เบราว์เซอร์ส่ง (ช่องกรอก, hidden, checkbox ที่ติ๊ก)"""
+    def __init__(self, form_id):
+        super().__init__()
+        self.form_id, self.inside, self.data = form_id, False, {}
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag == "form":
+            self.inside = a.get("id") == self.form_id
+        elif tag == "input" and self.inside and a.get("name"):
+            kind = a.get("type", "text")
+            if kind == "checkbox":
+                if "checked" in a:
+                    self.data[a["name"]] = a.get("value", "on")
+            elif kind not in ("submit", "button"):
+                self.data[a["name"]] = a.get("value") or ""
+
+    def handle_endtag(self, tag):
+        if tag == "form":
+            self.inside = False
+
+
+def sheet_form(client, url):
+    parser = _FormParser("sheet-form")
+    parser.feed(client.get(url).get_data(as_text=True))
+    return parser.data
+
+
 class Session:
     def __init__(self, client):
         self.c = client
@@ -132,8 +161,17 @@ def test_full_billing_flow(app, client):
     s.post("/admin/units/import", {"csv_text": "101,A,1,30,สมชาย,081\n102,A,1,40,สมหญิง,082\n"})
     with app.app_context():
         db = get_db()
+        # ค่าเริ่มต้น: ห้องชุดไม่มีค่าไฟ (จ่ายการไฟฟ้าเอง)
+        assert not db.execute("SELECT 1 FROM charge_types WHERE active=1 AND unit_type='room'"
+                              " AND name LIKE 'ค่าไฟ%'").fetchone()
+    # ทดสอบค่ามิเตอร์ตัวที่สอง: เพิ่มค่าไฟห้องชุดเอง
+    s.post("/admin/charges/new", {"name": "ค่าไฟฟ้า", "method": "meter_rate", "rate": "8", "frequency": "monthly",
+                                  "apply_to": "all", "unit_type": "room", "active": "1", "sort_order": "20",
+                                  "unit_label": "kWh"})
+    with app.app_context():
+        db = get_db()
         units = {r["unit_no"]: r["id"] for r in db.execute("SELECT * FROM units")}
-        cts = {r["name"]: r["id"] for r in db.execute("SELECT * FROM charge_types")}
+        cts = {r["name"]: r["id"] for r in db.execute("SELECT * FROM charge_types WHERE active=1 OR unit_type='shop'")}
     assert set(units) == {"101", "102"}
 
     # เพิ่มค่าบริการใหม่เฉพาะห้อง 102: ค่าที่จอดรถ 500
@@ -426,17 +464,18 @@ def test_shop_charges_and_all_in_one_sheet(app, client):
     # หน้ากรอกรวม: ห้องชุด
     page = client.get("/admin/sheet?period=2026-10&type=room").get_data(as_text=True)
     assert "ค่าส่วนกลาง" in page and "ค่าเช่าพื้นที่" not in page and "ร้าน 1" not in page
-    s.post("/admin/sheet", {"period": "2026-10", "type": "room", "read_date": "2026-10-08",
-                            f"prev_{w_room}_{room}": "100", f"curr_{w_room}_{room}": "103",
-                            f"pen_1_{room}": "40", f"othd_{room}": "ค่าซ่อมก๊อก", f"oth_{room}": "150",
-                            "action": "bill"})
+    form = sheet_form(client, "/admin/sheet?period=2026-10&type=room")
+    form.update({"read_date": "2026-10-08", f"prev_{w_room}_{room}": "100", f"curr_{w_room}_{room}": "103",
+                 f"pen_1_{room}": "40", f"othd_{room}": "ค่าซ่อมก๊อก", f"oth_{room}": "150", "action": "bill"})
+    s.post("/admin/sheet", form)
     # หน้ากรอกรวม: ร้านค้า
     page = client.get("/admin/sheet?period=2026-10&type=shop").get_data(as_text=True)
     assert "ค่าเช่าพื้นที่" in page and "ค่ารักษามิเตอร์" in page and "ค่าส่วนกลาง" not in page
-    s.post("/admin/sheet", {"period": "2026-10", "type": "shop", "read_date": "2026-10-08",
-                            f"prev_{w_shop}_{shop}": "50", f"curr_{w_shop}_{shop}": "60",
-                            f"prev_{e_shop}_{shop}": "1000", f"curr_{e_shop}_{shop}": "1200",
-                            f"amt_{rent}_{shop}": "3500", "action": "bill"})
+    form = sheet_form(client, "/admin/sheet?period=2026-10&type=shop")
+    form.update({"read_date": "2026-10-08", f"prev_{w_shop}_{shop}": "50", f"curr_{w_shop}_{shop}": "60",
+                 f"prev_{e_shop}_{shop}": "1000", f"curr_{e_shop}_{shop}": "1200",
+                 f"amt_{rent}_{shop}": "3500", "action": "bill"})
+    s.post("/admin/sheet", form)
     with app.app_context():
         db = get_db()
         inv = {r["unit_no"]: r for r in db.execute("SELECT * FROM invoices")}
@@ -451,7 +490,9 @@ def test_shop_charges_and_all_in_one_sheet(app, client):
     # ค่าเช่าจำไว้ใช้เดือนถัดไป, เบี้ยปรับแก้ได้หลังออกบิล
     page = client.get("/admin/sheet?period=2026-11&type=shop").get_data(as_text=True)
     assert 'value="3500.00"' in page
-    s.post("/admin/sheet", {"period": "2026-10", "type": "room", f"pen_0_{room}": "100", f"pen_1_{room}": "40"})
+    form = sheet_form(client, "/admin/sheet?period=2026-10&type=room")
+    form.update({f"pen_0_{room}": "100", f"pen_1_{room}": "40"})
+    s.post("/admin/sheet", form)
     with app.app_context():
         assert get_db().execute("SELECT total FROM invoices WHERE unit_no='26/1'").fetchone()[0] == 535 + 100
     page = client.get(f"/admin/invoices/{inv['ร้าน 1']['id']}").get_data(as_text=True)
@@ -509,3 +550,55 @@ def test_receipts_always_black_and_white(app, client):
     assert "bill--mono" not in client.get(f"/admin/invoices/{inv_id}").get_data(as_text=True)
     assert "bill--mono" in client.get("/admin/payments/1/receipt").get_data(as_text=True)
     assert "bill--mono" in client.get("/admin/receipts/print?period=2026-10&layout=half").get_data(as_text=True)
+
+
+def test_sheet_untick_items_per_room(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    for no in ("26/1", "26/2"):
+        s.post("/admin/units/new", {"unit_no": no, "unit_type": "room", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        ids = {r["unit_no"]: r["id"] for r in db.execute("SELECT * FROM units")}
+        cts = {r["name"]: r["id"] for r in db.execute("SELECT * FROM charge_types WHERE unit_type='room'")}
+        # ค่าไฟห้องชุดปิดไว้ตั้งแต่แรก (จ่ายการไฟฟ้าเอง)
+        assert db.execute("SELECT active FROM charge_types WHERE name='ค่าไฟฟ้า' AND unit_type='room'").fetchone() is None
+    r1, r2, water, trash = ids["26/1"], ids["26/2"], cts["ค่าน้ำประปา"], cts["ค่าขยะ"]
+    page = client.get("/admin/sheet?period=2026-10&type=room").get_data(as_text=True)
+    assert "ค่าไฟฟ้า" not in page
+    # ห้อง 26/1 จ่ายค่าน้ำมาแล้ว: เอาติ๊กค่าน้ำออก (ไม่ต้องจดมิเตอร์ก็ออกบิลได้), 26/2 ไม่เก็บค่าขยะ
+    form = sheet_form(client, "/admin/sheet?period=2026-10&type=room")
+    assert form[f"inc_{water}_{r1}"] == "1"
+    del form[f"inc_{water}_{r1}"]
+    del form[f"inc_{trash}_{r2}"]
+    form.update({f"prev_{water}_{r2}": "0", f"curr_{water}_{r2}": "10", "action": "bill"})
+    s.post("/admin/sheet", form)
+    with app.app_context():
+        db = get_db()
+        inv = {r["unit_no"]: r for r in db.execute("SELECT * FROM invoices")}
+        assert inv["26/1"]["total"] == 250 + 20 + 10          # ไม่มีค่าน้ำ
+        assert inv["26/2"]["total"] == 250 + 160 + 10         # น้ำ 10 หน่วย × 16, ไม่มีค่าขยะ
+        names = [r[0] for r in db.execute("SELECT description FROM invoice_items WHERE invoice_id=?", (inv["26/1"]["id"],))]
+        assert "ค่าน้ำประปา" not in names
+    # หลังออกบิล: ห้อง 26/2 ค้างแค่ค่าน้ำ -> เอาติ๊กส่วนกลาง/ประกันออก, ติ๊กค่าขยะกลับ
+    form = sheet_form(client, "/admin/sheet?period=2026-10&type=room")
+    assert f"inc_{trash}_{r2}" not in form and form[f"inc_{water}_{r2}"] == "1"
+    del form[f"inc_{cts['ค่าส่วนกลาง']}_{r2}"]
+    del form[f"inc_{cts['ค่าประกัน']}_{r2}"]
+    form[f"inc_{trash}_{r2}"] = "1"
+    s.post("/admin/sheet", form)
+    with app.app_context():
+        db = get_db()
+        row = db.execute("SELECT * FROM invoices WHERE unit_no='26/2'").fetchone()
+        assert row["total"] == 160 + 20
+        order = [r[0] for r in db.execute("SELECT description FROM invoice_items WHERE invoice_id=? ORDER BY sort_order",
+                                          (row["id"],))]
+        assert order == ["ค่าน้ำประปา", "ค่าขยะ"]
+    # จ่ายแล้วบางส่วน: เอาออกจนยอดน้อยกว่าที่จ่าย -> ไม่ยอม
+    s.post(f"/admin/invoices/{row['id']}/pay", {"amount": "170", "paid_at": "2026-10-05"})
+    form = sheet_form(client, "/admin/sheet?period=2026-10&type=room")
+    del form[f"inc_{water}_{r2}"]
+    r = s.post("/admin/sheet", form, follow_redirects=True)
+    assert "น้อยกว่าที่ชำระแล้ว" in r.get_data(as_text=True)
+    with app.app_context():
+        assert get_db().execute("SELECT total FROM invoices WHERE id=?", (row["id"],)).fetchone()[0] == 180

@@ -150,6 +150,14 @@ CREATE TABLE IF NOT EXISTS payments (
     created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+-- ค่าบริการที่ไม่เรียกเก็บจากห้องนี้ในงวดนี้ (ติ๊กออกในหน้ากรอกรวม)
+CREATE TABLE IF NOT EXISTS bill_exclusions (
+    unit_id        INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+    period         TEXT NOT NULL,
+    charge_type_id INTEGER NOT NULL REFERENCES charge_types(id) ON DELETE CASCADE,
+    PRIMARY KEY (unit_id, period, charge_type_id)
+);
+
 CREATE TABLE IF NOT EXISTS activity_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER,
@@ -199,9 +207,6 @@ DEFAULT_CHARGE_TYPES = [
          description="เหมาจ่ายเดือนละ 250 บาทต่อห้อง"),
     dict(name="ค่าน้ำประปา", method="meter_rate", rate=16, min_charge=65, fixed_fee=0,
          unit_label="หน่วย", sort_order=10, active=1, description=WATER_DESCRIPTION),
-    dict(name="ค่าไฟฟ้า", method="meter_rate", rate=8, min_charge=0, fixed_fee=0,
-         unit_label="kWh", sort_order=20, active=1,
-         description="คิดตามมิเตอร์ หน่วยละ 8 บาท"),
     dict(name="ค่าขยะ", method="fixed", rate=20, unit_label="เดือน", sort_order=30, active=1,
          description="ห้องละ 20 บาทต่อเดือน"),
     dict(name="ค่าประกัน", method="fixed", rate=10, unit_label="เดือน", sort_order=40, active=1,
@@ -298,6 +303,10 @@ def init_db(db):
     if db.execute("SELECT COUNT(*) FROM charge_types").fetchone()[0] == 0:
         for ct in DEFAULT_CHARGE_TYPES:
             insert_charge_type(db, {"unit_type": "room", **ct})
+    # ห้องชุดจ่ายค่าไฟกับการไฟฟ้าโดยตรง: ปิดค่าไฟของห้องชุด (ครั้งเดียว แอดมินเปิดกลับได้)
+    if not db.execute("SELECT 1 FROM settings WHERE key='_room_electric_off'").fetchone():
+        db.execute("UPDATE charge_types SET active=0 WHERE name='ค่าไฟฟ้า' AND unit_type='room'")
+        db.execute("INSERT INTO settings (key, value) VALUES ('_room_electric_off', '1')")
     # เพิ่มค่าบริการร้านค้าครั้งเดียว (ถ้าแอดมินลบทิ้งภายหลังจะไม่สร้างซ้ำ)
     if not db.execute("SELECT 1 FROM settings WHERE key='_shop_charges_seeded'").fetchone():
         if not db.execute("SELECT 1 FROM charge_types WHERE unit_type='shop'").fetchone():
