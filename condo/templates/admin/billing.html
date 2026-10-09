@@ -26,7 +26,11 @@
       {{ csrf() }}<input type="hidden" name="period" value="{{ period }}">
       <button class="btn btn-primary">ออกใบแจ้งหนี้งวด {{ period|period }}</button>
     </form>
-    {% if invoices %}<p style="margin-top:.75rem"><a class="btn" href="{{ url_for('admin.invoices_print', period=period) }}">พิมพ์ใบแจ้งหนี้ทั้งงวด</a></p>{% endif %}
+    {% if invoices %}<p class="actions" style="margin-top:.75rem">
+      <a class="btn" href="{{ url_for('admin.invoices_print', period=period) }}">พิมพ์ใบแจ้งหนี้ทั้งงวด</a>
+      <a class="btn" href="{{ url_for('admin.payments_bulk', period=period) }}">รับชำระหลายห้อง</a>
+      <a class="btn" href="{{ url_for('admin.receipts_print', period=period) }}">พิมพ์ใบเสร็จทั้งงวด</a>
+    </p>{% endif %}
   </div>
 </div>
 <div class="card">

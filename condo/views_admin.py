@@ -136,10 +136,35 @@ def unit_form(unit_id=None):
 @bp.route("/units/import", methods=("GET", "POST"))
 @admin_required
 def unit_import():
-    """นำเข้าห้องจำนวนมากจากข้อความ CSV: เลขห้อง,อาคาร,ชั้น,พื้นที่,ชื่อเจ้าของ,โทร"""
+    """นำเข้าห้องจำนวนมาก: สร้างตามชั้น/จำนวนห้อง หรือจากข้อความ CSV เลขห้อง,อาคาร,ชั้น,พื้นที่,ชื่อเจ้าของ,โทร"""
     if request.method == "POST":
         db = get_db()
         added, skipped = 0, []
+        if request.form.get("mode") == "generate":
+            first = request.form.get("floor_from", type=int) or 1
+            last = request.form.get("floor_to", type=int) or first
+            per_floor = request.form.get("per_floor", type=int) or 0
+            digits = request.form.get("digits", type=int) or 2
+            prefix = request.form.get("prefix", "").strip()
+            building = request.form.get("building", "").strip()
+            area = to_float(request.form.get("area_sqm"))
+            if not (1 <= per_floor <= 200 and 0 <= first <= last <= first + 200):
+                flash("กรุณากรอกชั้นและจำนวนห้องต่อชั้นให้ถูกต้อง", "error")
+                return redirect(url_for("admin.unit_import"))
+            for floor in range(first, last + 1):
+                for room in range(1, per_floor + 1):
+                    unit_no = f"{prefix}{floor}{room:0{digits}d}"
+                    try:
+                        db.execute("INSERT INTO units (unit_no, building, floor, area_sqm) VALUES (?,?,?,?)",
+                                   (unit_no, building, str(floor), area))
+                        added += 1
+                    except sqlite3.IntegrityError:
+                        skipped.append(unit_no)
+            log_activity(g.user, f"สร้างห้องอัตโนมัติ {added} ห้อง")
+            db.commit()
+            flash(f"สร้างห้องเรียบร้อย {added} ห้อง" + (f" (ข้ามเลขห้องซ้ำ {len(skipped)} ห้อง)" if skipped else ""),
+                  "success")
+            return redirect(url_for("admin.units"))
         text = request.form.get("csv_text", "")
         upload = request.files.get("csv_file")
         if upload and upload.filename:
@@ -602,6 +627,78 @@ def invoice_detail(invoice_id):
                            today=date.today().isoformat(), penalty_types=penalty_type_list())
 
 
+PAYMENT_METHODS = ["โอนเงิน", "เงินสด", "พร้อมเพย์", "เช็ค", "บัตรเครดิต", "อื่น ๆ"]
+
+
+def record_payment(db, inv, amount, paid_at, method, reference="", note=""):
+    """บันทึกรับชำระ 1 รายการ ออกเลขที่ใบเสร็จ และอัปเดตสถานะบิล (ผู้เรียกต้อง commit เอง)"""
+    receipt_no = billing.next_number(db, "payments", "receipt_no", paid_at)
+    db.execute(
+        "INSERT INTO payments (invoice_id, receipt_no, paid_at, amount, method, reference, note, created_by)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        (inv["id"], receipt_no, paid_at, amount, method, reference, note, g.user["id"]),
+    )
+    billing.refresh_invoice_status(db, inv["id"])
+    log_activity(g.user, f"รับชำระ {inv['invoice_no']} {amount:,.2f} บาท ({receipt_no})")
+    return receipt_no
+
+
+@bp.route("/payments/bulk", methods=("GET", "POST"))
+@admin_required
+def payments_bulk():
+    """รับชำระหลายห้องในหน้าเดียว"""
+    db = get_db()
+    period = get_period_arg()
+    invoices_ = db.execute(
+        "SELECT * FROM invoices WHERE period=? AND status IN ('unpaid','partial') ORDER BY unit_no", (period,)
+    ).fetchall()
+    if request.method == "POST":
+        paid_at = request.form.get("paid_at") or date.today().isoformat()
+        method = request.form.get("method") if request.form.get("method") in PAYMENT_METHODS else "โอนเงิน"
+        receipts, errors = [], []
+        for inv in invoices_:
+            if not request.form.get(f"pay_{inv['id']}"):
+                continue
+            amount = billing.money(to_float(request.form.get(f"amount_{inv['id']}")))
+            outstanding = billing.money(inv["total"] - inv["paid_amount"])
+            if amount <= 0 or amount > outstanding + 0.005:
+                errors.append(inv["unit_no"])
+                continue
+            receipts.append(record_payment(db, inv, amount, paid_at, method,
+                                           request.form.get(f"ref_{inv['id']}", "").strip()))
+        db.commit()
+        if receipts:
+            flash(f"บันทึกรับชำระ {len(receipts)} ห้อง ใบเสร็จเลขที่ {receipts[0]} ถึง {receipts[-1]}", "success")
+        if errors:
+            flash("จำนวนเงินไม่ถูกต้อง (ยังไม่บันทึก): ห้อง " + ", ".join(errors), "error")
+        if not receipts and not errors:
+            flash("ยังไม่ได้เลือกห้องที่ชำระ", "info")
+        return redirect(url_for("admin.payments_bulk", period=period))
+    return render_template("admin/payments_bulk.html", period=period, invoices=invoices_,
+                           methods=PAYMENT_METHODS, today=date.today().isoformat())
+
+
+@bp.route("/receipts/print")
+@admin_required
+def receipts_print():
+    """พิมพ์ใบเสร็จหลายใบในครั้งเดียว: ตามงวดบิล หรือตามเดือนที่รับเงิน"""
+    db = get_db()
+    period = get_period_arg()
+    by = "paid" if request.args.get("by") == "paid" else "invoice"
+    layout = "half" if request.args.get("layout") == "half" else "full"
+    if by == "paid":
+        rows = db.execute("SELECT p.* FROM payments p WHERE substr(p.paid_at,1,7)=? ORDER BY p.paid_at, p.id",
+                          (period,)).fetchall()
+    else:
+        rows = db.execute("SELECT p.* FROM payments p JOIN invoices i ON i.id=p.invoice_id WHERE i.period=?"
+                          " ORDER BY i.unit_no, p.id", (period,)).fetchall()
+    docs = []
+    for p in rows:
+        inv, items, _payments, unit = load_invoice(p["invoice_id"])
+        docs.append((p, inv, items, unit))
+    return render_template("receipt_batch.html", docs=docs, period=period, by=by, layout=layout)
+
+
 @bp.route("/invoices/<int:invoice_id>/pay", methods=("POST",))
 @admin_required
 def invoice_pay(invoice_id):
@@ -616,15 +713,8 @@ def invoice_pay(invoice_id):
     elif amount > billing.money(inv["total"] - inv["paid_amount"]) + 0.005:
         flash("จำนวนเงินเกินยอดค้างชำระ", "error")
     else:
-        receipt_no = billing.next_number(db, "payments", "receipt_no", paid_at)
-        db.execute(
-            "INSERT INTO payments (invoice_id, receipt_no, paid_at, amount, method, reference, note, created_by)"
-            " VALUES (?,?,?,?,?,?,?,?)",
-            (invoice_id, receipt_no, paid_at, amount, request.form.get("method", "โอนเงิน"),
-             request.form.get("reference", "").strip(), request.form.get("note", "").strip(), g.user["id"]),
-        )
-        billing.refresh_invoice_status(db, invoice_id)
-        log_activity(g.user, f"รับชำระ {inv['invoice_no']} {amount:,.2f} บาท ({receipt_no})")
+        receipt_no = record_payment(db, inv, amount, paid_at, request.form.get("method", "โอนเงิน"),
+                                    request.form.get("reference", "").strip(), request.form.get("note", "").strip())
         db.commit()
         flash(f"บันทึกรับชำระเรียบร้อย ใบเสร็จเลขที่ {receipt_no}", "success")
     return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))

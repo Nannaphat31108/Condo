@@ -1,15 +1,54 @@
 {% extends "base.html" %}
 {% from "_macros.html" import csrf %}
 {% block content %}
-<h1>นำเข้าข้อมูลห้องหลายห้อง</h1>
-<div class="card" style="max-width:760px">
-  <p>รูปแบบ CSV หนึ่งบรรทัดต่อหนึ่งห้อง: <code>เลขห้อง,อาคาร,ชั้น,พื้นที่,ชื่อเจ้าของ,เบอร์โทร</code> (เลขห้องที่มีอยู่แล้วจะถูกข้าม)</p>
-  <form method="post" enctype="multipart/form-data">
-    {{ csrf() }}
-    <div class="field"><label>วางข้อความ</label><textarea name="csv_text" rows="10" placeholder="101,A,1,32.5,สมชาย ใจดี,0812345678&#10;102,A,1,28,สมหญิง รักดี,0899999999"></textarea></div>
-    <div class="field"><label>หรือเลือกไฟล์ .csv</label><input type="file" name="csv_file" accept=".csv,text/csv"></div>
-    <button class="btn btn-primary">นำเข้า</button>
-    <a class="btn" href="{{ url_for('admin.units') }}">ยกเลิก</a>
-  </form>
+<h1>เพิ่มห้องจำนวนมาก</h1>
+<div class="grid grid-2">
+  <div class="card">
+    <h2>สร้างห้องอัตโนมัติตามชั้น</h2>
+    <form method="post">
+      {{ csrf() }}<input type="hidden" name="mode" value="generate">
+      <div class="form-row">
+        <div class="field"><label>ตั้งแต่ชั้น</label><input type="number" name="floor_from" value="1" min="0" required></div>
+        <div class="field"><label>ถึงชั้น</label><input type="number" name="floor_to" value="8" min="0" required></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>จำนวนห้องต่อชั้น</label><input type="number" name="per_floor" value="25" min="1" max="200" required></div>
+        <div class="field"><label>เลขห้องในชั้น (หลัก)</label><select name="digits"><option value="2">2 หลัก (เช่น 101, 125)</option><option value="3">3 หลัก (เช่น 1001)</option><option value="1">1 หลัก (เช่น 11)</option></select></div>
+      </div>
+      <div class="form-row">
+        <div class="field"><label>คำนำหน้าเลขห้อง</label><input type="text" name="prefix" placeholder="เช่น A-"><div class="help">ไม่ใส่ก็ได้</div></div>
+        <div class="field"><label>อาคาร</label><input type="text" name="building"></div>
+        <div class="field"><label>พื้นที่ (ตร.ม.)</label><input type="number" step="0.01" name="area_sqm"></div>
+      </div>
+      <div class="preview-box" id="gen-preview"></div>
+      <p class="help">ชื่อเจ้าของ/เบอร์โทร ใส่เพิ่มทีหลังได้ที่หน้าห้อง หรือใช้การนำเข้า CSV ด้านขวา (เลขห้องซ้ำจะถูกข้าม)</p>
+      <button class="btn btn-primary">สร้างห้อง</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>นำเข้าจาก CSV / Excel</h2>
+    <p class="small">หนึ่งบรรทัดต่อหนึ่งห้อง: <code>เลขห้อง,อาคาร,ชั้น,พื้นที่,ชื่อเจ้าของ,เบอร์โทร</code> — จาก Excel ให้ Save As เป็น CSV UTF-8</p>
+    <form method="post" enctype="multipart/form-data">
+      {{ csrf() }}
+      <div class="field"><label>วางข้อความ</label><textarea name="csv_text" rows="8" placeholder="101,A,1,32.5,สมชาย ใจดี,0812345678&#10;102,A,1,28,สมหญิง รักดี,0899999999"></textarea></div>
+      <div class="field"><label>หรือเลือกไฟล์ .csv</label><input type="file" name="csv_file" accept=".csv,text/csv"></div>
+      <button class="btn btn-primary">นำเข้า</button>
+    </form>
+  </div>
 </div>
+<a class="btn" href="{{ url_for('admin.units') }}">กลับ</a>
+{% endblock %}
+{% block scripts %}
+<script>
+var f = document.querySelector('input[name=mode]').form;
+function pad(n, d) { n = String(n); while (n.length < d) n = '0' + n; return n; }
+function show() {
+  var a = +f.floor_from.value, b = +f.floor_to.value, n = +f.per_floor.value, d = +f.digits.value, p = f.prefix.value;
+  var total = b >= a && n > 0 ? (b - a + 1) * n : 0;
+  document.getElementById('gen-preview').textContent = total
+    ? 'จะได้ ' + total + ' ห้อง: ' + p + a + pad(1, d) + ', ' + p + a + pad(2, d) + ' ... ' + p + b + pad(n, d)
+    : 'กรุณากรอกข้อมูลให้ครบ';
+}
+f.addEventListener('input', show); show();
+</script>
 {% endblock %}

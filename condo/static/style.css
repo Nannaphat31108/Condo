@@ -192,3 +192,21 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
   .doc { border: 0; padding: 0; max-width: none; margin: 0; }
   .card { border: 0; padding: 0; }
 }
+
+/* ใบเสร็จแบบย่อ 2 ใบต่อ A4 */
+.doc.compact { padding: 1rem 1.25rem; font-size: 12px; }
+.doc.compact .doc-head { padding-bottom: .4rem; margin-bottom: .5rem; font-size: .8rem; }
+.doc.compact .doc-head .org-name { font-size: 1rem; }
+.doc.compact .doc-title { padding: .15rem .9rem; }
+.doc.compact .doc-title .th { font-size: 1.05rem; }
+.doc.compact .doc-info { margin-bottom: .5rem; gap: .5rem; }
+.doc.compact .info-box th, .doc.compact .info-box td { padding: .1rem .5rem; font-size: .8rem; }
+.doc.compact .doc-items th, .doc.compact .doc-items td { padding: .15rem .4rem; font-size: .8rem; }
+.doc.compact .doc-items .total-row td { font-size: .88rem; }
+.doc.compact .doc-foot { margin-top: .4rem; font-size: .8rem; }
+.doc.compact .signs { margin-top: 1.6rem; font-size: .8rem; }
+@media print {
+  .half-sheet { height: 136mm; overflow: hidden; border-bottom: 1px dashed #999; margin-bottom: 4mm; }
+  .half-sheet .doc { margin: 0; }
+}
+.page-break { page-break-after: always; break-after: page; }

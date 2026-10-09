@@ -248,3 +248,45 @@ def test_cannot_edit_meter_after_invoiced(app, client):
     s.post("/admin/billing", {"period": "2026-09"})
     r = s.post("/admin/meters", {**data, f"curr_{unit_id}": "20"}, follow_redirects=True)
     assert "ต้องยกเลิกบิลก่อน" in r.get_data(as_text=True)
+
+
+def test_generate_rooms_bulk_payment_and_receipt_print(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    # 198 ห้อง: ชั้น 1-9 ชั้นละ 22 ห้อง
+    s.post("/admin/units/import", {"mode": "generate", "floor_from": "1", "floor_to": "9", "per_floor": "22",
+                                   "digits": "2", "building": "A"})
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT COUNT(*) FROM units").fetchone()[0] == 198
+        assert {"101", "122", "922"} <= {r[0] for r in db.execute("SELECT unit_no FROM units")}
+        db.execute("UPDATE charge_types SET active=0 WHERE method LIKE 'meter%'")
+        db.commit()
+    s.post("/admin/billing", {"period": "2026-10"})
+    with app.app_context():
+        db = get_db()
+        invs = db.execute("SELECT * FROM invoices ORDER BY unit_no").fetchall()
+        assert len(invs) == 198 and invs[0]["total"] == 280
+        assert invs[-1]["invoice_no"] == "0198/10/2026"
+
+    form = {"period": "2026-10", "paid_at": "2026-10-05", "method": "เงินสด"}
+    for inv in invs[:3]:
+        form[f"pay_{inv['id']}"] = "1"
+        form[f"amount_{inv['id']}"] = "280"
+    form[f"pay_{invs[3]['id']}"] = "1"
+    form[f"amount_{invs[3]['id']}"] = "100"   # ชำระบางส่วน
+    form[f"amount_{invs[4]['id']}"] = "280"   # ไม่ได้ติ๊ก -> ไม่บันทึก
+    s.post("/admin/payments/bulk", form)
+    with app.app_context():
+        db = get_db()
+        rc = [r[0] for r in db.execute("SELECT receipt_no FROM payments ORDER BY id")]
+        assert rc == ["0001/10/2026", "0002/10/2026", "0003/10/2026", "0004/10/2026"]
+        statuses = [db.execute("SELECT status FROM invoices WHERE id=?", (i["id"],)).fetchone()[0] for i in invs[:5]]
+        assert statuses == ["paid", "paid", "paid", "partial", "unpaid"]
+
+    for url in ["/admin/payments/bulk?period=2026-10", "/admin/receipts/print?period=2026-10",
+                "/admin/receipts/print?period=2026-10&by=paid&layout=half", "/admin/units/import"]:
+        r = client.get(url)
+        assert r.status_code == 200, url
+    page = client.get("/admin/receipts/print?period=2026-10&layout=half").get_data(as_text=True)
+    assert page.count('class="half-sheet"') == 4 and "0004/10/2026" in page

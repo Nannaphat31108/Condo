@@ -1,0 +1,56 @@
+{# ตัวเอกสารใบเสร็จ ใช้ร่วมกันระหว่างหน้าใบเสร็จเดี่ยวและพิมพ์หลายใบ: ต้องมี p, inv, items, unit #}
+{% set doc_title_th = 'ใบเสร็จรับเงิน' %}{% set doc_title_en = 'RECEIPT' %}
+<div class="doc{{ ' compact' if compact is defined and compact }}">
+  {% include "_doc_header.html" %}
+  <div class="doc-info">
+    <table class="info-box">
+      <tr><th>ได้รับเงินจาก</th><td>{{ inv.owner_name or '-' }}</td></tr>
+      <tr><th>ห้องเลขที่</th><td>{{ inv.unit_no }}{% if unit and unit.building %} อาคาร {{ unit.building }}{% endif %}</td></tr>
+      <tr><th>ประจำเดือน</th><td>{{ inv.period|period }}</td></tr>
+    </table>
+    <table class="info-box">
+      <tr><th>เลขที่</th><td><b>{{ p.receipt_no }}</b></td></tr>
+      <tr><th>วันที่</th><td>{{ p.paid_at|thaidate }}</td></tr>
+      <tr><th>อ้างอิงใบแจ้งหนี้</th><td>{{ inv.invoice_no }}</td></tr>
+    </table>
+  </div>
+  <table class="doc-items">
+    <thead>
+      <tr><th rowspan="2" style="width:44px">ลำดับ</th><th rowspan="2">รายการ</th><th colspan="2" class="c">เลขมิเตอร์</th><th rowspan="2" class="num">จำนวน<br>หน่วย</th><th rowspan="2" class="num">หน่วยละ</th><th rowspan="2" class="num">จำนวนเงิน<br>(บาท)</th></tr>
+      <tr><th class="num">ครั้งก่อน</th><th class="num">ครั้งนี้</th></tr>
+    </thead>
+    <tbody>
+    {% for it in items %}
+      <tr>
+        <td class="c">{{ loop.index }}</td><td>{{ it.description }}</td>
+        {% if it.meter_curr is not none %}
+          <td class="num">{{ it.meter_prev|num }}</td><td class="num">{{ it.meter_curr|num }}</td>
+          <td class="num">{{ it.quantity|num }}</td><td class="num">{{ it.unit_price|baht }}</td>
+        {% else %}<td></td><td></td><td></td><td></td>{% endif %}
+        <td class="num">{{ (it.amount + it.vat_amount)|baht }}</td>
+      </tr>
+    {% endfor %}
+    {% for _ in range([0, (blank_rows if blank_rows is defined else 8) - items|length]|max) %}<tr class="blank"><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>{% endfor %}
+    </tbody>
+    <tfoot>
+      {% if p.amount != inv.total %}
+      <tr><td colspan="6" class="num">ยอดตามใบแจ้งหนี้</td><td class="num">{{ inv.total|baht }}</td></tr>
+      {% endif %}
+      <tr class="total-row"><td colspan="2" class="words">({{ p.amount|bahttext }})</td><td colspan="4" class="num">{{ 'รับชำระครั้งนี้' if p.amount != inv.total else 'รวมเงินทั้งสิ้น' }}</td><td class="num">{{ p.amount|baht }}</td></tr>
+      {% if inv.total - inv.paid_amount > 0.005 %}
+      <tr><td colspan="6" class="num">คงค้างชำระ</td><td class="num">{{ (inv.total - inv.paid_amount)|baht }}</td></tr>
+      {% endif %}
+    </tfoot>
+  </table>
+  <div class="doc-foot">
+    <div class="pay-methods">
+      <b>ชำระโดย</b>
+      {% set known = ['เงินสด', 'โอนเงิน', 'พร้อมเพย์', 'เช็ค'] %}
+      {% for m in known %}<span>{{ '☑' if p.method == m else '☐' }} {{ m }}</span>{% endfor %}
+      <span>{{ '☑' if p.method not in known else '☐' }} อื่น ๆ{% if p.method not in known %} ({{ p.method }}){% endif %}</span>
+    </div>
+    {% if p.reference %}<div><b>เลขที่อ้างอิง:</b> {{ p.reference }}</div>{% endif %}
+    {% if p.note %}<div><b>หมายเหตุ:</b> {{ p.note }}</div>{% endif %}
+  </div>
+  <div class="signs"><div>ผู้ชำระเงิน<br><span class="muted small">วันที่ ......../......../........</span></div><div>ผู้รับเงิน<br><span class="muted small">วันที่ ......../......../........</span></div></div>
+</div>
