@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block content %}
+<h1>ลบห้องหลายห้อง</h1>
+<div class="card">
+  <form method="get" class="filters">
+    <div class="field"><label>เลขห้องตั้งแต่</label><input type="text" name="from" value="{{ first }}" placeholder="เช่น 101" required></div>
+    <div class="field"><label>ถึง</label><input type="text" name="to" value="{{ last }}" placeholder="เช่น 825" required></div>
+    <button class="btn">แสดงรายการ</button>
+  </form>
+  <p class="help">เรียงเลขห้องแบบตัวเลข เช่น 101 ถึง 825 จะได้ 101, 102 … 825 (ไม่รวมห้องแบบ 26/1)</p>
+</div>
+{% if first and last %}
+<div class="card">
+  {% if units %}
+    {% set with_bills = units|selectattr('invoice_count')|list %}
+    <h2>พบ {{ units|length }} ห้อง: {{ units[0].unit_no }} … {{ units[-1].unit_no }}</h2>
+    {% if with_bills %}<div class="flash error">มี {{ with_bills|length }} ห้องที่มีใบแจ้งหนี้แล้ว: {{ with_bills|map(attribute='unit_no')|join(', ') }}</div>{% endif %}
+    <div class="checklist" style="margin-bottom:1rem">{% for u in units %}<span>{{ u.unit_no }}{% if u.invoice_count %} <span class="badge unpaid">มีบิล</span>{% endif %}</span>{% endfor %}</div>
+    <form method="post" data-confirm="ยืนยันลบ {{ units|length }} ห้อง ({{ units[0].unit_no }} ถึง {{ units[-1].unit_no }}) ? ลบแล้วกู้คืนไม่ได้">
+      {{ csrf() }}<input type="hidden" name="from" value="{{ first }}"><input type="hidden" name="to" value="{{ last }}">
+      {% if with_bills %}
+      <div class="field"><label class="check"><input type="checkbox" name="include_history" value="1"> ลบประวัติบิลและการรับชำระของห้องเหล่านี้ด้วย (ใช้กับข้อมูลทดลองเท่านั้น)</label></div>
+      {% endif %}
+      <button class="btn btn-danger">ลบ {{ units|length }} ห้อง</button>
+      <a class="btn" href="{{ url_for('admin.units') }}">ยกเลิก</a>
+    </form>
+  {% else %}
+    <p class="muted">ไม่พบห้องในช่วงนี้</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

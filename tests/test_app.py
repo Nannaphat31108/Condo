@@ -368,3 +368,31 @@ def test_sequential_rooms_khlong_chan_26(app, client):
     assert [r["unit_no"] for r in rows][:3] == ["26/1", "26/2", "26/3"]
     page = client.get("/admin/units").get_data(as_text=True)
     assert page.index(">26/2<") < page.index(">26/10<") < page.index(">26/100<")
+
+
+def test_bulk_delete_room_range(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/import", {"mode": "generate", "floor_from": "1", "floor_to": "8", "per_floor": "25",
+                                   "digits": "2"})
+    s.post("/admin/units/import", {"mode": "sequence", "prefix": "26/", "start_no": "1", "first_floor": "1",
+                                   "floor_counts": "22,44,44,44,44"})
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT COUNT(*) FROM units").fetchone()[0] == 200 + 198
+        db.execute("UPDATE charge_types SET active=0 WHERE method LIKE 'meter%'")
+        db.commit()
+        test_unit = db.execute("SELECT id FROM units WHERE unit_no='101'").fetchone()[0]
+    s.post("/admin/billing", {"period": "2026-10"})  # ห้องทดลองมีบิลแล้ว
+    page = client.get("/admin/units/bulk-delete?from=101&to=825").get_data(as_text=True)
+    assert "พบ 200 ห้อง" in page and "26/1<" not in page
+    s.post("/admin/units/bulk-delete", {"from": "101", "to": "825"})
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM units").fetchone()[0] == 398  # มีบิล ไม่ลบ
+    s.post("/admin/units/bulk-delete", {"from": "101", "to": "825", "include_history": "1"})
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT COUNT(*) FROM units").fetchone()[0] == 198
+        assert db.execute("SELECT COUNT(*) FROM units WHERE unit_no LIKE '26/%'").fetchone()[0] == 198
+        assert db.execute("SELECT COUNT(*) FROM invoices WHERE unit_id=?", (test_unit,)).fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM invoices").fetchone()[0] == 198

@@ -4,6 +4,7 @@
   <h1>ห้องชุด / ลูกบ้าน</h1>
   <div class="actions">
     <form method="get" class="filters"><input type="text" name="q" value="{{ q }}" placeholder="ค้นหาเลขห้อง ชื่อเจ้าของ/ผู้เช่า เบอร์โทร"></form>
+    <a class="btn btn-danger" href="{{ url_for('admin.unit_bulk_delete') }}">ลบหลายห้อง</a>
     <a class="btn" href="{{ url_for('admin.unit_import') }}">เพิ่มห้องจำนวนมาก</a>
     <a class="btn btn-primary" href="{{ url_for('admin.unit_form') }}">+ เพิ่มห้อง</a>
   </div>

@@ -239,6 +239,48 @@ def unit_detail(unit_id):
     return render_template("admin/unit_detail.html", unit=unit, invoices=invoices, readings=readings, users=users)
 
 
+def natural_key(unit_no):
+    return (len(unit_no), unit_no)
+
+
+@bp.route("/units/bulk-delete", methods=("GET", "POST"))
+@admin_required
+def unit_bulk_delete():
+    """ลบห้องหลายห้องตามช่วงเลขห้อง (เรียงแบบตัวเลข เช่น 101 ถึง 825) — ดูรายการก่อนยืนยัน"""
+    db = get_db()
+    first = request.values.get("from", "").strip()
+    last = request.values.get("to", "").strip()
+    units_ = []
+    if first and last:
+        lo, hi = natural_key(first), natural_key(last)
+        units_ = [u for u in db.execute(
+            "SELECT u.*, (SELECT COUNT(*) FROM invoices i WHERE i.unit_id=u.id) AS invoice_count,"
+            " (SELECT COUNT(*) FROM payments p JOIN invoices i ON i.id=p.invoice_id WHERE i.unit_id=u.id) AS payment_count"
+            " FROM units u ORDER BY length(u.unit_no), u.unit_no").fetchall()
+            if lo <= natural_key(u["unit_no"]) <= hi]
+    if request.method == "POST":
+        include_history = bool(request.form.get("include_history"))
+        deleted, kept = [], []
+        for u in units_:
+            if u["invoice_count"] and not include_history:
+                kept.append(u["unit_no"])
+                continue
+            # ลบประวัติบิลของห้องนี้ (การชำระเงิน/รายการในบิลถูกลบตามอัตโนมัติ)
+            db.execute("DELETE FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE unit_id=?)", (u["id"],))
+            db.execute("DELETE FROM invoices WHERE unit_id=?", (u["id"],))
+            db.execute("DELETE FROM units WHERE id=?", (u["id"],))
+            deleted.append(u["unit_no"])
+        if deleted:
+            log_activity(g.user, f"ลบห้อง {len(deleted)} ห้อง ({first} ถึง {last})"
+                                 + (" พร้อมประวัติบิล" if include_history else ""))
+        db.commit()
+        flash(f"ลบห้องแล้ว {len(deleted)} ห้อง", "success")
+        if kept:
+            flash(f"ไม่ได้ลบ {len(kept)} ห้องที่มีใบแจ้งหนี้แล้ว (ติ๊ก 'ลบประวัติบิลด้วย' ถ้าเป็นข้อมูลทดลอง)", "error")
+        return redirect(url_for("admin.units"))
+    return render_template("admin/unit_bulk_delete.html", units=units_, first=first, last=last)
+
+
 @bp.route("/units/<int:unit_id>/delete", methods=("POST",))
 @admin_required
 def unit_delete(unit_id):
