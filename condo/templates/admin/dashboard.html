@@ -44,7 +44,7 @@
       <thead><tr><th>ห้อง</th><th>งวด</th><th>ครบกำหนด</th><th class="num">คงค้าง</th></tr></thead>
       <tbody>
       {% for i in overdue %}
-        <tr><td><a href="{{ url_for('admin.invoice_detail', invoice_id=i.id) }}">{{ i.unit_no }}</a></td><td>{{ i.period|period }}</td><td>{{ i.due_date }}</td><td class="num">{{ (i.total - i.paid_amount)|baht }}</td></tr>
+        <tr><td><a href="{{ url_for('admin.invoice_detail', invoice_id=i.id) }}">{{ i.unit_no }}</a></td><td>{{ i|invperiod }}</td><td>{{ i.due_date }}</td><td class="num">{{ (i.total - i.paid_amount)|baht }}</td></tr>
       {% endfor %}
       </tbody>
     </table></div>

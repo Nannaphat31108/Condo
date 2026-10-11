@@ -80,6 +80,7 @@ def create_app(test_config=None):
     app.add_template_filter(billing.bahttext, "bahttext")
     app.add_template_filter(billing.thai_date, "thaidate")
     app.add_template_filter(billing.thai_date_short, "thaidate_short")
+    app.add_template_filter(billing.invoice_period_label, "invperiod")
 
     from . import auth, views_admin, views_resident
     app.register_blueprint(auth.bp)

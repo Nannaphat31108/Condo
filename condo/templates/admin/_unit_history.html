@@ -8,6 +8,7 @@
       <span>ค้างชำระ <b class="{{ 'due' if history.outstanding.amount > 0 }}">{{ history.outstanding.amount|baht }}</b> บาท
         {% if history.outstanding.cnt %}({{ history.outstanding.cnt }} บิล){% endif %}</span>
       <span>ชำระแล้วรวม <b>{{ history.paid_total|baht }}</b> บาท</span>
+      <a class="btn btn-sm" href="{{ url_for('admin.unit_multi_bill', unit_id=unit.id) }}" target="_top">ค้างย้อนหลัง / จ่ายล่วงหน้า</a>
     </div>
   </div>
   <div class="table-wrap"><table class="history-table">
@@ -15,7 +16,7 @@
     <tbody>
     {% for r in history.rows %}{% set inv = r.inv %}
       <tr>
-        <td class="nowrap"><a href="{{ url_for('admin.invoice_detail', invoice_id=inv.id) }}" target="_top">{{ inv.period|period }}</a>
+        <td class="nowrap"><a href="{{ url_for('admin.invoice_detail', invoice_id=inv.id) }}" target="_top">{{ inv|invperiod }}</a>
           {% if r.usage %}<div class="muted small">ใช้{{ r.usage|join(', ') }} หน่วย</div>{% endif %}</td>
         {% for c in history.columns %}<td class="num">{{ r.amounts[c]|baht if r.amounts.get(c) else '—' }}</td>{% endfor %}
         <td class="num"><b>{{ inv.total|baht }}</b></td>

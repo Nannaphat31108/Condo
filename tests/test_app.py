@@ -492,10 +492,12 @@ def test_shop_charges_and_all_in_one_sheet(app, client):
     page = client.get("/admin/sheet?period=2026-11&type=shop").get_data(as_text=True)
     assert 'value="3500.00"' in page
     form = sheet_form(client, "/admin/sheet?period=2026-10&type=room")
-    form.update({f"pen_0_{room}": "100", f"pen_1_{room}": "40"})
+    # หลังออกบิลแล้ว มีเบี้ยปรับเพิ่ม -> ออกเป็นบิลใบใหม่ (บิลเดิมไม่เปลี่ยน)
+    form.update({f"pen_0_{room}": "100", "action": "bill"})
     s.post("/admin/sheet", form)
     with app.app_context():
-        assert get_db().execute("SELECT total FROM invoices WHERE unit_no='26/1'").fetchone()[0] == 560 + 100
+        totals = [r[0] for r in get_db().execute("SELECT total FROM invoices WHERE unit_no='26/1' ORDER BY id")]
+        assert totals == [560, 100]
     page = client.get(f"/admin/invoices/{inv['ร้าน 1']['id']}").get_data(as_text=True)
     assert "ร้านค้า" in page and "ค่ารักษามิเตอร์" in page
 
@@ -587,14 +589,17 @@ def test_sheet_untick_items_per_room(app, client):
     del form[f"inc_{cts['ค่าส่วนกลาง']}_{r2}"]
     del form[f"inc_{cts['ค่าประกัน']}_{r2}"]
     form[f"inc_{trash}_{r2}"] = "1"
+    form["action"] = "bill"
     s.post("/admin/sheet", form)
     with app.app_context():
         db = get_db()
-        row = db.execute("SELECT * FROM invoices WHERE unit_no='26/2'").fetchone()
-        assert row["total"] == 160 + 25 + 20
+        bills = db.execute("SELECT * FROM invoices WHERE unit_no='26/2' ORDER BY id").fetchall()
+        row = bills[0]
+        assert row["total"] == 160 + 25                     # ส่วนกลาง/ประกันถูกเอาออกจากบิลเดิม
         order = [r[0] for r in db.execute("SELECT description FROM invoice_items WHERE invoice_id=? ORDER BY sort_order",
                                           (row["id"],))]
-        assert order == ["ค่าน้ำประปา", "ค่ารักษามิเตอร์", "ค่าขยะ"]
+        assert order == ["ค่าน้ำประปา", "ค่ารักษามิเตอร์"]
+        assert len(bills) == 2 and bills[1]["total"] == 20    # ค่าขยะที่ติ๊กกลับ -> บิลใบใหม่
     # จ่ายแล้วบางส่วน: เอาออกจนยอดน้อยกว่าที่จ่าย -> ไม่ยอม
     s.post(f"/admin/invoices/{row['id']}/pay", {"amount": "170", "paid_at": "2026-10-05"})
     form = sheet_form(client, "/admin/sheet?period=2026-10&type=room")
@@ -602,7 +607,7 @@ def test_sheet_untick_items_per_room(app, client):
     r = s.post("/admin/sheet", form, follow_redirects=True)
     assert "น้อยกว่าที่ชำระแล้ว" in r.get_data(as_text=True)
     with app.app_context():
-        assert get_db().execute("SELECT total FROM invoices WHERE id=?", (row["id"],)).fetchone()[0] == 205
+        assert get_db().execute("SELECT total FROM invoices WHERE id=?", (row["id"],)).fetchone()[0] == 185
 
 
 def test_meter_fee_for_rooms_and_reset_room(app, client):
@@ -710,3 +715,80 @@ def test_unit_history(app, client):
     assert "ประวัติรายเดือน" in client.get(f"/admin/units/{uid}").get_data(as_text=True)
     assert "data-history" in client.get("/admin/sheet?period=2026-10&type=room").get_data(as_text=True)
     assert "data-history" in client.get("/admin/units").get_data(as_text=True)
+
+
+def test_arrears_advance_and_rebill_same_month(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/new", {"unit_no": "26/1", "unit_type": "room", "owner_name": "สมชาย", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        uid = db.execute("SELECT id FROM units").fetchone()[0]
+        cts = {r["name"]: r["id"] for r in db.execute("SELECT * FROM charge_types WHERE active=1")}
+    water, trash, common = cts["ค่าน้ำประปา"], cts["ค่าขยะ"], cts["ค่าส่วนกลาง"]
+    fixed = (common, cts["ค่ารักษามิเตอร์"], trash, cts["ค่าประกัน"])   # 250 + 25 + 20 + 10 = 305 / เดือน
+
+    # ค้าง 5 ปี (60 เดือน) ย้อนหลัง -> บิลเดียว
+    page = client.get(f"/admin/units/{uid}/multi-bill?from=2021-10&to=2026-09").get_data(as_text=True)
+    assert "60 เดือน" in page
+    form = {"from": "2021-10", "to": "2026-09", "lump_description": "ค้างค่าน้ำเก่า", "lump_amount": "1000"}
+    for ct in fixed:
+        form[f"inc_{ct}"] = "1"
+    form[f"monthly_{common}"] = "200"         # ค่าส่วนกลางสมัยก่อน 200 บาท
+    s.post(f"/admin/units/{uid}/multi-bill", form)
+    with app.app_context():
+        db = get_db()
+        arrears = db.execute("SELECT * FROM invoices").fetchone()
+        assert (arrears["period"], arrears["period_to"]) == ("2021-10", "2026-09")
+        assert arrears["total"] == 60 * (200 + 25 + 20 + 10) + 1000
+    # เดือน ก.ย. 69 อยู่ในบิลค้างแล้ว -> ออกบิลรายเดือน ก.ย. ได้แค่ค่าน้ำ
+    form = sheet_form(client, "/admin/sheet?period=2026-09&type=room")
+    assert f"inc_{common}_{uid}" not in form           # แสดงเป็น "บิลแล้ว"
+    form.update({f"prev_{water}_{uid}": "0", f"curr_{water}_{uid}": "10", "action": "bill"})
+    s.post("/admin/sheet", form)
+    with app.app_context():
+        sep = get_db().execute("SELECT * FROM invoices WHERE period='2026-09' AND period_to IS NULL").fetchone()
+        assert sep["total"] == 160
+
+    # จ่ายล่วงหน้า 12 เดือน + รับชำระทันที
+    s.post(f"/admin/units/{uid}/multi-bill", {"from": "2026-11", "to": "2027-10", **{f"inc_{ct}": "1" for ct in fixed},
+                                             "pay_now": "1", "paid_at": "2026-10-11", "method": "เงินสด"})
+    with app.app_context():
+        db = get_db()
+        adv = db.execute("SELECT * FROM invoices WHERE period='2026-11'").fetchone()
+        assert adv["total"] == 12 * 305 and adv["status"] == "paid"
+    # ขอล่วงหน้าซ้ำช่วงเดียวกัน -> ทุกเดือนบิลแล้ว ไม่มีอะไรให้ออก
+    page = client.get(f"/admin/units/{uid}/multi-bill?from=2026-11&to=2027-10").get_data(as_text=True)
+    assert "ข้าม 12 เดือนที่ออกบิลแล้ว" in page
+
+    # ต.ค. 69: จ่ายค่าขยะก่อน -> ภายหลังมาจ่ายค่าน้ำ = บิลใบที่สองของเดือนเดียวกัน
+    form = sheet_form(client, "/admin/sheet?period=2026-10&type=room")
+    for ct in (water, common, cts["ค่ารักษามิเตอร์"], cts["ค่าประกัน"]):
+        del form[f"inc_{ct}_{uid}"]
+    form["action"] = "bill"
+    s.post("/admin/sheet", form)
+    with app.app_context():
+        first = get_db().execute("SELECT * FROM invoices WHERE period='2026-10' ORDER BY id").fetchone()
+        assert first["total"] == 20
+    s.post(f"/admin/invoices/{first['id']}/pay", {"amount": "20", "paid_at": "2026-10-05"})
+    form = sheet_form(client, "/admin/sheet?period=2026-10&type=room")
+    form.update({f"inc_{water}_{uid}": "1", f"inc_{common}_{uid}": "1",
+                 f"prev_{water}_{uid}": "10", f"curr_{water}_{uid}": "13", "action": "bill"})
+    s.post("/admin/sheet", form)
+    with app.app_context():
+        bills = get_db().execute("SELECT * FROM invoices WHERE period='2026-10' ORDER BY id").fetchall()
+        assert [b["total"] for b in bills] == [20, 65 + 250]
+    # กดออกบิลซ้ำอีกรอบ -> ไม่มีบิลซ้ำ
+    form = sheet_form(client, "/admin/sheet?period=2026-10&type=room")
+    form["action"] = "bill"
+    s.post("/admin/sheet", form)
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM invoices WHERE period='2026-10'").fetchone()[0] == 2
+
+    # บิลที่ชำระแล้วยังแก้ไขได้: เพิ่มรายการ -> กลับเป็นชำระบางส่วน
+    s.post(f"/admin/invoices/{first['id']}/items", {"description": "ค่าซ่อม", "amount": "50"})
+    with app.app_context():
+        row = get_db().execute("SELECT * FROM invoices WHERE id=?", (first["id"],)).fetchone()
+        assert (row["total"], row["status"]) == (70, "partial")
+    page = client.get(f"/admin/invoices/{adv['id']}").get_data(as_text=True)
+    assert "bill-stamp" not in page and "พ.ย. 69 – ต.ค. 70" in page

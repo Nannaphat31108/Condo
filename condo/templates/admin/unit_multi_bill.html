@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block title %}ค้างย้อนหลัง / จ่ายล่วงหน้า {{ unit.unit_no }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>ค้างย้อนหลัง / จ่ายล่วงหน้า — {{ unit.unit_no }}</h1>
+  <div class="actions"><a class="btn" href="{{ url_for('admin.unit_detail', unit_id=unit.id) }}">กลับไปหน้าห้อง</a>
+    <a class="btn" href="{{ url_for('admin.unit_history_page', unit_id=unit.id) }}" data-history="{{ url_for('admin.unit_history_page', unit_id=unit.id, partial=1) }}">ประวัติ</a></div>
+</div>
+<p class="muted">ออกบิลรวมหลายเดือนในใบเดียว (ใบเสร็จใบเดียว) — เดือนที่ออกบิลไปแล้วระบบข้ามให้อัตโนมัติ ไม่เก็บซ้ำ
+  · ค่าน้ำ/ค่าไฟตามมิเตอร์ไม่อยู่ในนี้ ถ้ามียอดค้างค่าน้ำย้อนหลังให้ใส่ในช่อง "ยอดค้างยกมา / อื่น ๆ"</p>
+
+<div class="card">
+  <h2>1. เลือกช่วงเดือน</h2>
+  <form method="get" class="filters" id="range-form">
+    <div class="field"><label>ตั้งแต่งวด</label><input type="month" name="from" value="{{ p_from }}" required></div>
+    <div class="field"><label>ถึงงวด</label><input type="month" name="to" value="{{ p_to }}" required></div>
+    <button class="btn btn-primary">คำนวณ</button>
+  </form>
+  <div class="actions" style="margin-top:.75rem">
+    <span class="muted small">ทางลัด:</span>
+    <button type="button" class="btn btn-sm" data-range="-12,-1">ค้าง 1 ปีที่ผ่านมา</button>
+    <button type="button" class="btn btn-sm" data-range="-36,-1">ค้าง 3 ปี</button>
+    <button type="button" class="btn btn-sm" data-range="-60,-1">ค้าง 5 ปี</button>
+    <button type="button" class="btn btn-sm" data-range="0,0">เดือนนี้</button>
+    <button type="button" class="btn btn-sm" data-range="1,3">ล่วงหน้า 3 เดือน</button>
+    <button type="button" class="btn btn-sm" data-range="1,6">ล่วงหน้า 6 เดือน</button>
+    <button type="button" class="btn btn-sm" data-range="1,12">ล่วงหน้า 12 เดือน</button>
+  </div>
+</div>
+
+<form method="post" id="bill-form">
+  {{ csrf() }}<input type="hidden" name="from" value="{{ p_from }}"><input type="hidden" name="to" value="{{ p_to }}">
+  <div class="card">
+    <h2>2. รายการที่จะเรียกเก็บ ({{ p_from|period }} – {{ p_to|period }}, {{ months|length }} เดือน)</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th></th><th>รายการ</th><th class="num">บาท / เดือน</th><th class="num">จำนวนเดือน</th><th class="num">รวม (บาท)</th><th>หมายเหตุ</th></tr></thead>
+      <tbody>
+      {% for l in lines %}{% set ct = l.ct %}
+        <tr data-line>
+          <td><input type="checkbox" name="inc_{{ ct.id }}" value="1" {{ 'checked' if l.months and l.monthly }} {{ 'disabled' if not l.months }}></td>
+          <td><b>{{ ct.name }}</b></td>
+          <td class="num"><input class="cell" type="number" step="0.01" min="0" name="monthly_{{ ct.id }}" value="{{ '%.2f'|format(l.monthly) }}" {{ 'disabled' if not l.months }}></td>
+          <td class="num" data-months="{{ l.months|length }}">{{ l.months|length }}</td>
+          <td class="num"><b class="line-total"></b></td>
+          <td class="small muted">{% if l.months %}{{ l.months[0]|period }}{% if l.months|length > 1 %} – {{ l.months[-1]|period }}{% endif %}{% endif %}
+            {% if l.skipped %}<div>ข้าม {{ l.skipped }} เดือนที่ออกบิลแล้ว</div>{% endif %}
+            {% if not l.months and not l.skipped %}ไม่มีเดือนที่ต้องเก็บ{% endif %}</td>
+        </tr>
+      {% endfor %}
+        <tr>
+          <td></td>
+          <td colspan="2"><label>ยอดค้างยกมา / อื่น ๆ <span class="muted small">(เช่น ค้างค่าน้ำย้อนหลัง หรือไม่ทราบรายละเอียดว่ากี่ปี)</span></label>
+            <input type="text" name="lump_description" placeholder="ยอดค้างชำระยกมา"></td>
+          <td></td>
+          <td class="num"><input class="cell" type="number" step="0.01" name="lump_amount" id="lump" placeholder="0.00"></td>
+          <td></td>
+        </tr>
+      </tbody>
+      <tfoot><tr><td></td><td colspan="3">รวมทั้งบิล</td><td class="num" id="grand-total">0.00</td><td></td></tr></tfoot>
+    </table></div>
+  </div>
+  <div class="card">
+    <h2>3. ออกบิล</h2>
+    <div class="field"><label class="check"><input type="checkbox" name="pay_now" value="1" id="pay-now"> รับชำระทันที (จ่ายครบทั้งบิล)</label></div>
+    <div class="form-row" id="pay-fields">
+      <div class="field"><label>วันที่ชำระ</label><input type="date" name="paid_at" value="{{ today }}"></div>
+      <div class="field"><label>ช่องทาง</label><select name="method">{% for m in methods %}<option>{{ m }}</option>{% endfor %}</select></div>
+      <div class="field"><label>เลขอ้างอิง</label><input type="text" name="reference"></div>
+      <div class="field"><label>&nbsp;</label><label class="check"><input type="checkbox" name="print_receipt" value="1" {{ 'checked' if settings.auto_print_receipt != '0' }}> พิมพ์ใบเสร็จทันที</label></div>
+    </div>
+    <button class="btn btn-primary" data-confirm-click="ยืนยันออกบิลห้อง {{ unit.unit_no }} ?">ออกใบแจ้งหนี้</button>
+  </div>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var cur = '{{ current }}'.split('-').map(Number);
+  function shift(n) { var y = cur[0], m = cur[1] - 1 + n; y += Math.floor(m / 12); m = ((m % 12) + 12) % 12; return y + '-' + String(m + 1).padStart(2, '0'); }
+  var rf = document.getElementById('range-form');
+  document.querySelectorAll('[data-range]').forEach(function (b) {
+    b.addEventListener('click', function () { var r = b.dataset.range.split(',').map(Number); rf.from.value = shift(r[0]); rf.to.value = shift(r[1]); rf.submit(); });
+  });
+  var form = document.getElementById('bill-form');
+  function fmt(v) { return v.toLocaleString('th-TH', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+  function calc() {
+    var total = 0;
+    form.querySelectorAll('[data-line]').forEach(function (tr) {
+      var on = tr.querySelector('input[type=checkbox]'), m = +tr.querySelector('[data-months]').dataset.months;
+      var v = (parseFloat(tr.querySelector('input[type=number]').value) || 0) * m;
+      tr.querySelector('.line-total').textContent = fmt(v);
+      tr.style.opacity = on.checked ? 1 : .45;
+      if (on.checked) total += v;
+    });
+    total += parseFloat(document.getElementById('lump').value) || 0;
+    document.getElementById('grand-total').innerHTML = '<b>' + fmt(total) + '</b>';
+  }
+  form.addEventListener('input', calc); form.addEventListener('change', calc); calc();
+  var pay = document.getElementById('pay-now'), fields = document.getElementById('pay-fields');
+  function sync() { fields.style.display = pay.checked ? '' : 'none'; }
+  pay.addEventListener('change', sync); sync();
+  form.querySelectorAll('[data-confirm-click]').forEach(function (b) {
+    b.addEventListener('click', function (e) { if (!confirm(b.dataset.confirmClick)) e.preventDefault(); });
+  });
+})();
+</script>
+{% endblock %}

@@ -7,7 +7,7 @@ import os
 import re
 import json
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 
 from flask import (Blueprint, Response, abort, flash, g, redirect, render_template, request,
                    send_file, url_for)
@@ -287,6 +287,93 @@ def unit_history(db, unit_id, limit=24):
         " AND status IN ('unpaid','partial')", (unit_id,)).fetchone()
     paid_total = sum(r["inv"]["paid_amount"] for r in rows)
     return {"rows": rows, "columns": columns, "outstanding": outstanding, "paid_total": paid_total}
+
+
+def multi_bill_lines(db, unit, months):
+    """ค่าบริการรายเดือน (ไม่รวมค่ามิเตอร์) ที่ยังไม่ได้บิลในช่วงเดือนที่เลือก"""
+    selections = billing.load_selections(db)
+    cts = db.execute("SELECT * FROM charge_types WHERE active=1 AND method NOT IN ('meter_rate','meter_tiered')"
+                     " AND unit_type IN ('all', ?) ORDER BY sort_order, id", (unit["unit_type"],)).fetchall()
+    billed = {m: billing.billed_charges(db, unit["id"], m) for m in months}
+    excluded = {(r["period"], r["charge_type_id"]) for r in db.execute(
+        "SELECT * FROM bill_exclusions WHERE unit_id=?", (unit["id"],))}
+    lines = []
+    for ct in cts:
+        sel = selections.get(ct["id"], {})
+        applies = [m for m in months if billing.charge_applies(ct, m, unit, sel) and (m, ct["id"]) not in excluded]
+        due = [m for m in applies if ct["id"] not in billed[m]]
+        item = billing.compute_item(ct, unit, None, sel.get(unit["id"]))
+        lines.append({"ct": ct, "monthly": item["amount"], "months": due, "skipped": len(applies) - len(due)})
+    return lines
+
+
+@bp.route("/units/<int:unit_id>/multi-bill", methods=("GET", "POST"))
+@admin_required
+def unit_multi_bill(unit_id):
+    """ออกบิลหลายเดือน: ค้างชำระย้อนหลัง / จ่ายล่วงหน้า / ยอดค้างยกมา (ไม่ทราบรายละเอียด)"""
+    db = get_db()
+    unit = get_or_404("SELECT * FROM units WHERE id=?", (unit_id,))
+    current = billing.current_period()
+    p_from = request.values.get("from") if valid_period(request.values.get("from")) else current
+    p_to = request.values.get("to") if valid_period(request.values.get("to")) else p_from
+    if p_to < p_from:
+        p_from, p_to = p_to, p_from
+    months = billing.months_between(p_from, p_to)
+    lines = multi_bill_lines(db, unit, months)
+
+    if request.method == "POST":
+        f = request.form
+        items = []
+        for line in lines:
+            ct, due = line["ct"], line["months"]
+            if not f.get(f"inc_{ct['id']}") or not due:
+                continue
+            monthly = billing.money(to_float(f.get(f"monthly_{ct['id']}"), line["monthly"]))
+            if monthly <= 0:
+                continue
+            amount = billing.money(monthly * len(due))
+            label = billing.period_label(due[0]) if len(due) == 1 else \
+                f"{billing.short_period(due[0])} – {billing.short_period(due[-1])}"
+            items.append({
+                "charge_type_id": ct["id"], "description": f"{ct['name']} ({label})",
+                "detail": f"{len(due)} เดือน × {monthly:,.2f}", "quantity": len(due), "unit_label": "เดือน",
+                "unit_price": monthly, "amount": amount,
+                "vat_amount": billing.money(amount * float(ct["vat_percent"] or 0) / 100),
+                "sort_order": ct["sort_order"], "kind": "auto", "period_from": due[0], "period_to": due[-1],
+            })
+        lump = billing.money(to_float(f.get("lump_amount")))
+        if lump:
+            items.append({
+                "charge_type_id": None, "description": f.get("lump_description", "").strip() or "ยอดค้างชำระยกมา",
+                "detail": "", "quantity": 1, "unit_label": "รายการ", "unit_price": lump, "amount": lump,
+                "vat_amount": 0.0, "sort_order": 900, "kind": "manual",
+            })
+        if not items:
+            flash("ยังไม่ได้เลือกรายการ หรือทุกเดือนในช่วงนี้ออกบิลไปแล้ว", "error")
+            return redirect(url_for("admin.unit_multi_bill", unit_id=unit_id, **{"from": p_from, "to": p_to}))
+        settings = get_settings()
+        today = date.today().isoformat()
+        due_date = (date.today() + timedelta(days=int(settings.get("due_days") or 15))).isoformat()
+        invoice_id, invoice_no = billing.create_invoice(db, unit, p_from, items, settings, today, due_date,
+                                                        period_to=p_to, number_by=today)
+        log_activity(g.user, f"ออกบิลหลายเดือน {invoice_no} ห้อง {unit['unit_no']} ({p_from} ถึง {p_to})")
+        if f.get("pay_now"):
+            inv = db.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+            receipt_no = record_payment(db, inv, inv["total"], f.get("paid_at") or today,
+                                        f.get("method") if f.get("method") in PAYMENT_METHODS else "เงินสด",
+                                        f.get("reference", "").strip())
+            db.commit()
+            flash(f"ออกบิล {invoice_no} และรับชำระแล้ว ใบเสร็จเลขที่ {receipt_no}", "success")
+            payment_id = db.execute("SELECT id FROM payments WHERE receipt_no=?", (receipt_no,)).fetchone()[0]
+            if f.get("print_receipt"):
+                return redirect(url_for("admin.receipt", payment_id=payment_id, print=1))
+            return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))
+        db.commit()
+        flash(f"ออกใบแจ้งหนี้ {invoice_no} แล้ว", "success")
+        return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))
+
+    return render_template("admin/unit_multi_bill.html", unit=unit, p_from=p_from, p_to=p_to, months=months,
+                           lines=lines, current=current, today=date.today().isoformat(), methods=PAYMENT_METHODS)
 
 
 @bp.route("/units/<int:unit_id>/history")
@@ -610,8 +697,7 @@ def save_reading(db, ct, unit, period, prev_raw, curr_raw, read_date, reset=Fals
         return f"{unit['unit_no']} {ct['name']}: เลขครั้งนี้ ({curr_raw}) น้อยกว่าเลขครั้งก่อน ({prev_raw})"
     if curr < prev:  # มิเตอร์วนรอบ/เปลี่ยนมิเตอร์ใหม่: ถือว่าเริ่มนับจาก 0
         prev = 0
-    invoiced = db.execute("SELECT invoice_no FROM invoices WHERE unit_id=? AND period=? AND status!='void'",
-                          (unit["id"], period)).fetchone()
+    invoiced = billing.billed_charges(db, unit["id"], period).get(ct["id"])  # ค่ามิเตอร์นี้ออกบิลแล้ว
     existing = db.execute("SELECT * FROM meter_readings WHERE charge_type_id=? AND unit_id=? AND period=?",
                           (ct["id"], unit["id"], period)).fetchone()
     if existing and (existing["prev_reading"], existing["curr_reading"]) == (prev, curr):
@@ -682,8 +768,7 @@ def meters():
         "SELECT * FROM meter_readings WHERE charge_type_id=? AND period=?", (ct["id"], period))}
     # เลขครั้งก่อน = เลขปัจจุบันของงวดล่าสุดก่อนหน้า
     last = last_readings(db, ct["id"], period)
-    invoiced = {r["unit_id"] for r in db.execute(
-        "SELECT unit_id FROM invoices WHERE period=? AND status!='void'", (period,))}
+    invoiced = {u["id"] for u in units_list if ct["id"] in billing.billed_charges(db, u["id"], period)}
     rows = []
     for unit in units_list:
         reading = current.get(unit["id"])
@@ -788,6 +873,7 @@ def upsert_adhoc(db, unit_id, period, kind, description, amount):
 @bp.route("/sheet", methods=("GET", "POST"))
 @admin_required
 def sheet():
+    """กรอกรวมทุกรายการ: รายการที่ออกบิลแล้วแสดงเป็น "บิลแล้ว" ส่วนที่ยังไม่บิลกรอก/ติ๊กแล้วออกบิลเพิ่มได้เสมอ"""
     db = get_db()
     period = get_period_arg()
     unit_type = request.values.get("type") if request.values.get("type") in billing.UNIT_TYPE_LABELS else "room"
@@ -795,71 +881,43 @@ def sheet():
     penalty_types = penalty_type_list()
     units_ = db.execute("SELECT * FROM units WHERE active=1 AND unit_type=? ORDER BY length(unit_no), unit_no",
                         (unit_type,)).fetchall()
-    invoices_ = {r["unit_id"]: r for r in db.execute(
-        "SELECT * FROM invoices WHERE period=? AND status!='void'", (period,))}
     selections = billing.load_selections(db)
 
     if request.method == "POST":
         f = request.form
         read_date = f.get("read_date") or date.today().isoformat()
-        errors, changed = [], 0
+        errors = []
         for unit in units_:
             uid = unit["id"]
-            inv = invoices_.get(uid)
             if not f.get(f"row_{uid}"):
-                continue  # แถวที่แก้ไขไม่ได้ (บิลชำระครบแล้ว)
-            if inv:
-                # ออกบิลแล้ว (ยังไม่ชำระครบ): ติ๊กเพิ่ม/เอาออกรายการ และแก้เบี้ยปรับ
-                db.execute("SAVEPOINT sheet_row")
-                have = {it["charge_type_id"]: it for it in db.execute(
-                    "SELECT * FROM invoice_items WHERE invoice_id=? AND charge_type_id IS NOT NULL", (inv["id"],))}
-                for col in cols:
-                    ct = col["ct"]
-                    want = bool(f.get(f"inc_{ct['id']}_{uid}"))
-                    if want and ct["id"] not in have:
-                        item = billing.charge_item(db, ct, unit, period, selections)
-                        if item is None:
-                            errors.append(f"{unit['unit_no']} {ct['name']}: ยังไม่ได้จดมิเตอร์ จึงเพิ่มในบิลไม่ได้")
-                            continue
-                        billing.insert_item(db, inv["id"], item)
-                        set_exclusion(db, uid, period, ct["id"], False)
-                        changed += 1
-                    elif not want and ct["id"] in have:
-                        db.execute("DELETE FROM invoice_items WHERE id=?", (have[ct["id"]]["id"],))
-                        set_exclusion(db, uid, period, ct["id"], True)
-                        changed += 1
-                for idx, name in enumerate(penalty_types):
-                    raw = f.get(f"pen_{idx}_{uid}")
-                    if raw is not None and billing.set_penalty(db, inv["id"], name, to_float(raw)):
-                        changed += 1
-                billing.renumber_items(db, inv["id"])
-                billing.recalc_invoice(db, inv["id"])
-                fresh = db.execute("SELECT total, paid_amount FROM invoices WHERE id=?", (inv["id"],)).fetchone()
-                if fresh["total"] + 0.005 < fresh["paid_amount"]:
-                    db.execute("ROLLBACK TO sheet_row")
-                    errors.append(f"{unit['unit_no']}: ยอดบิลหลังแก้จะน้อยกว่าที่ชำระแล้ว ({fresh['paid_amount']:,.2f}) ยังไม่บันทึก")
-                db.execute("RELEASE sheet_row")
                 continue
+            billed = billing.billed_charges(db, uid, period)
+            db.execute("SAVEPOINT sheet_row")
+            touched = set()
             for col in cols:
                 ct = col["ct"]
+                item = billed.get(ct["id"])
+                if item:
+                    # ออกบิลแล้ว: เอาติ๊กออก = ลบรายการนี้ออกจากบิลที่ยังไม่ชำระครบ
+                    if (f.get(f"has_{ct['id']}_{uid}") and not f.get(f"inc_{ct['id']}_{uid}")
+                            and item["period_from"] is None and item["inv_status"] in ("unpaid", "partial")):
+                        db.execute("DELETE FROM invoice_items WHERE id=?", (item["id"],))
+                        set_exclusion(db, uid, period, ct["id"], True)
+                        touched.add(item["invoice_id"])
+                    continue
                 if f.get(f"has_{ct['id']}_{uid}"):
                     set_exclusion(db, uid, period, ct["id"], not f.get(f"inc_{ct['id']}_{uid}"))
-            for col in cols:
-                ct = col["ct"]
                 if col["kind"] == "meter":
                     result = save_reading(db, ct, unit, period, f.get(f"prev_{ct['id']}_{uid}"),
                                           f.get(f"curr_{ct['id']}_{uid}"), read_date)
-                    if result is True:
-                        changed += 1
-                    elif result:
+                    if result and result is not True:
                         errors.append(result)
                 elif col["kind"] == "manual":
                     raw = f.get(f"amt_{ct['id']}_{uid}")
                     if raw is None:
                         continue
                     amount = billing.money(to_float(raw))
-                    current = selections.get(ct["id"], {}).get(uid)
-                    if (current or 0) == amount:
+                    if (selections.get(ct["id"], {}).get(uid) or 0) == amount:
                         continue
                     if amount:
                         db.execute("INSERT INTO charge_type_units (charge_type_id, unit_id, amount_override) VALUES (?,?,?)"
@@ -867,7 +925,7 @@ def sheet():
                                    (ct["id"], uid, amount))
                     else:
                         db.execute("DELETE FROM charge_type_units WHERE charge_type_id=? AND unit_id=?", (ct["id"], uid))
-                    changed += 1
+            # เบี้ยปรับ / อื่น ๆ ที่กรอกในหน้านี้ = รายการที่จะออกในบิลถัดไป
             for idx, name in enumerate(penalty_types):
                 raw = f.get(f"pen_{idx}_{uid}")
                 if raw is not None:
@@ -876,6 +934,16 @@ def sheet():
             if raw is not None:
                 upsert_adhoc(db, uid, period, "other", f.get(f"othd_{uid}", "").strip() or "อื่น ๆ",
                              billing.money(to_float(raw)))
+            bad = False
+            for invoice_id in touched:
+                billing.renumber_items(db, invoice_id)
+                billing.recalc_invoice(db, invoice_id)
+                fresh = db.execute("SELECT total, paid_amount FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+                bad = bad or fresh["total"] + 0.005 < fresh["paid_amount"]
+            if bad:
+                db.execute("ROLLBACK TO sheet_row")
+                errors.append(f"{unit['unit_no']}: ยอดบิลหลังเอารายการออกจะน้อยกว่าที่ชำระแล้ว ยังไม่บันทึกแถวนี้")
+            db.execute("RELEASE sheet_row")
         log_activity(g.user, f"กรอกรวม {billing.UNIT_TYPE_LABELS[unit_type]} งวด {period}")
         db.commit()
         for e in errors[:20]:
@@ -884,9 +952,10 @@ def sheet():
             result = billing.generate_invoices(db, period, get_settings(), unit_ids=[u["id"] for u in units_])
             log_activity(g.user, f"ออกใบแจ้งหนี้งวด {period} จำนวน {len(result['created'])} ฉบับ (จากหน้ากรอกรวม)")
             db.commit()
-            flash(f"บันทึกแล้ว และออกใบแจ้งหนี้ใหม่ {len(result['created'])} ฉบับ", "success")
+            flash(f"บันทึกแล้ว และออกใบแจ้งหนี้ใหม่ {len(result['created'])} ฉบับ"
+                  + (" (ห้องที่ออกบิลครบแล้วไม่ออกซ้ำ)" if result["skipped_existing"] else ""), "success")
             if result["missing_meter"]:
-                flash(f"ยังไม่ออกบิล {len(result['missing_meter'])} รายการ เพราะยังไม่จดมิเตอร์: "
+                flash(f"ยังไม่ออกบิล {len(result['missing_meter'])} ห้อง เพราะยังไม่จดมิเตอร์: "
                       + ", ".join(result["missing_meter"][:30]), "error")
         else:
             flash("บันทึกข้อมูลเรียบร้อย", "success")
@@ -912,34 +981,25 @@ def sheet():
     rows = []
     for unit in units_:
         uid = unit["id"]
-        inv = invoices_.get(uid)
-        editable = inv is None or billing.invoice_editable(inv)
-        row = {"unit": unit, "inv": inv, "editable": editable, "cells": {}, "penalties": {}, "other": None}
-        by_ct = {}
-        if inv:
-            items = db.execute("SELECT * FROM invoice_items WHERE invoice_id=?", (inv["id"],)).fetchall()
-            for it in items:
-                if it["charge_type_id"]:
-                    by_ct[it["charge_type_id"]] = it
-                elif it["kind"] == "penalty":
-                    row["penalties"][it["description"]] = it["amount"]
-            other = sum(it["amount"] for it in items if not it["charge_type_id"] and it["kind"] != "penalty")
-            row["other"] = {"amount": other}
-            row["total"] = inv["total"]
+        billed = billing.billed_charges(db, uid, period)
+        invs = billing.invoices_covering(db, uid, period)
+        row = {"unit": unit, "invoices": invs, "cells": {}, "penalties": {}, "billed_penalties": {}}
+        for inv in invs:
+            for it in db.execute("SELECT * FROM invoice_items WHERE invoice_id=? AND kind='penalty'", (inv["id"],)):
+                row["billed_penalties"][it["description"]] = row["billed_penalties"].get(it["description"], 0) + it["amount"]
         for col in cols:
             ct = col["ct"]
             sel = selections.get(ct["id"], {})
+            item = billed.get(ct["id"])
+            if item:
+                row["cells"][ct["id"]] = {
+                    "billed": item, "applies": True, "included": True, "amount": item["amount"] + item["vat_amount"],
+                    "removable": item["period_from"] is None and item["inv_status"] in ("unpaid", "partial"),
+                }
+                continue
             applies = col["kind"] == "manual" or billing.charge_applies(ct, period, unit, sel)
-            cell = {"applies": applies, "included": (uid, ct["id"]) not in exclusions, "amount": None}
-            if inv:
-                item = by_ct.get(ct["id"])
-                cell.update(item=item, included=item is not None, applies=applies or item is not None)
-                if item:
-                    cell["amount"] = item["amount"] + item["vat_amount"]
-                elif applies and col["kind"] != "manual":
-                    est = billing.charge_item(db, ct, unit, period, selections)  # ยอดถ้าติ๊กเพิ่มกลับ
-                    cell["amount"] = est["amount"] + est["vat_amount"] if est else None
-            elif col["kind"] == "meter":
+            cell = {"billed": None, "applies": applies, "included": (uid, ct["id"]) not in exclusions, "amount": None}
+            if col["kind"] == "meter":
                 r = readings[ct["id"]]
                 cur = r["current"].get(uid)
                 cell.update(prev=cur["prev_reading"] if cur else r["last"].get(uid, 0),
@@ -947,24 +1007,25 @@ def sheet():
             elif col["kind"] == "manual":
                 cell["amount"] = sel.get(uid)
             elif applies:
-                item = billing.compute_item(ct, unit, None, sel.get(uid))
-                cell["amount"] = item["amount"] + item["vat_amount"]
+                it = billing.compute_item(ct, unit, None, sel.get(uid))
+                cell["amount"] = it["amount"] + it["vat_amount"]
             row["cells"][ct["id"]] = cell
-        if not inv:
-            for name in penalty_types:
-                a = pending.get((uid, name))
-                row["penalties"][name] = a["amount"] if a else None
-            a = pending.get((uid, "other"))
-            row["other"] = {"amount": a["amount"] if a else None, "description": a["description"] if a else ""}
-            items, missing, _ = billing.build_unit_items(db, unit, period, all_cts, selections)
-            row["total"] = billing.money(sum(i["amount"] + i["vat_amount"] for i in items))
-            row["missing"] = missing
+        for name in penalty_types:
+            a = pending.get((uid, name))
+            row["penalties"][name] = a["amount"] if a else None
+        a = pending.get((uid, "other"))
+        row["other"] = {"amount": a["amount"] if a else None, "description": a["description"] if a else ""}
+        items, missing, _ = billing.build_unit_items(db, unit, period, all_cts, selections)
+        row["new_total"] = billing.money(sum(i["amount"] + i["vat_amount"] for i in items))
+        row["missing"] = missing
+        row["billed_total"] = billing.money(sum(i["total"] for i in invs))
         rows.append(row)
     counts = dict(db.execute("SELECT unit_type, COUNT(*) FROM units WHERE active=1 GROUP BY unit_type").fetchall())
     read_date = next((r["read_date"] for m in readings.values() for r in m["current"].values() if r["read_date"]),
                      date.today().isoformat())
     return render_template("admin/sheet.html", period=period, unit_type=unit_type, cols=cols, rows=rows,
                            penalty_types=penalty_types, counts=counts, read_date=read_date)
+
 
 
 # ---------------------------------------------------------------- billing / invoices
@@ -1161,8 +1222,8 @@ def invoice_add_item(invoice_id):
     description = request.form.get("description", "").strip()
     amount = to_float(request.form.get("amount"))
     penalty_types = penalty_type_list()
-    if not billing.invoice_editable(inv):
-        flash("บิลนี้ชำระครบหรือยกเลิกแล้ว แก้ไขรายการไม่ได้", "error")
+    if inv["status"] == "void":
+        flash("บิลนี้ถูกยกเลิกแล้ว แก้ไขรายการไม่ได้", "error")
     elif not description or amount == 0:
         flash("กรุณากรอกรายการและจำนวนเงิน", "error")
     elif billing.money(inv["total"] + amount) < inv["paid_amount"]:
@@ -1186,14 +1247,16 @@ def invoice_item_delete(item_id):
     db = get_db()
     item = get_or_404("SELECT * FROM invoice_items WHERE id=?", (item_id,))
     inv = db.execute("SELECT * FROM invoices WHERE id=?", (item["invoice_id"],)).fetchone()
-    if item["kind"] == "auto":
-        flash("รายการที่ระบบคำนวณลบไม่ได้ (ให้ยกเลิกบิลแล้วออกใหม่แทน)", "error")
-    elif not billing.invoice_editable(inv):
-        flash("บิลนี้ชำระครบหรือยกเลิกแล้ว แก้ไขรายการไม่ได้", "error")
+    if inv["status"] == "void":
+        flash("บิลนี้ถูกยกเลิกแล้ว แก้ไขรายการไม่ได้", "error")
     elif billing.money(inv["total"] - item["amount"] - item["vat_amount"]) < inv["paid_amount"]:
         flash("ยอดบิลหลังลบรายการจะน้อยกว่ายอดที่ชำระแล้ว", "error")
     else:
         db.execute("DELETE FROM invoice_items WHERE id=?", (item_id,))
+        if item["charge_type_id"] and not item["period_from"]:
+            # ค่าบริการที่ลบออก = เดือนนั้นไม่เก็บจากห้องนี้ (ไม่ถูกดึงกลับมาในบิลใบถัดไป)
+            set_exclusion(db, inv["unit_id"], inv["period"], item["charge_type_id"], True)
+        billing.renumber_items(db, inv["id"])
         # ถ้ารายการมาจาก "รายการเรียกเก็บเพิ่มเติม" ให้ลบต้นทางด้วย จะได้ไม่ถูกเรียกเก็บซ้ำในบิลถัดไป
         db.execute("DELETE FROM adhoc_charges WHERE invoice_id=? AND description=? AND amount=?",
                    (inv["id"], item["description"], item["amount"]))

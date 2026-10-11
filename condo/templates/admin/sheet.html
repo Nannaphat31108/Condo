@@ -14,7 +14,8 @@
 </div>
 <p class="muted small">เห็นทุกรายการของทุก{{ 'ร้าน' if unit_type == 'shop' else 'ห้อง' }}ในหน้าเดียว — กรอกเลขมิเตอร์ {% if cols|selectattr('kind', 'equalto', 'manual')|list %}ค่าเช่า {% endif %}เบี้ยปรับ และรายการอื่น ๆ แล้วกด
   <b>บันทึก</b> หรือ <b>บันทึกและออกใบแจ้งหนี้</b> ยอดรวมคำนวณให้ทันทีขณะพิมพ์<br>
-  <b>☑ ติ๊กเฉพาะรายการที่ห้องนี้ต้องจ่าย</b> — เอาติ๊กออก = ไม่เรียกเก็บเดือนนี้ (เช่น จ่ายค่าน้ำมาแล้ว) · ห้องที่ออกบิลแล้วแต่ยังไม่ชำระครบ ติ๊กเพิ่ม/เอาออกได้ ยอดบิลคำนวณใหม่ให้</p>
+  <b>☑ ติ๊กเฉพาะรายการที่ห้องนี้ต้องจ่าย</b> — เอาติ๊กออก = ไม่เรียกเก็บเดือนนี้ · รายการที่ <span class="badge partial">บิลแล้ว</span>/<span class="badge paid">จ่ายแล้ว</span> จะไม่ถูกเก็บซ้ำ
+  · กรอกรายการที่เหลือ (เช่น ค่าน้ำที่มาจ่ายทีหลัง) แล้วกด "บันทึกและออกใบแจ้งหนี้" จะได้บิลใบใหม่เฉพาะรายการที่ยังไม่ได้บิล</p>
 
 {% if not rows %}
   <div class="flash info">ยังไม่มี{{ UNIT_TYPE_LABELS[unit_type] }} —
@@ -48,29 +49,29 @@
         {% endfor %}
         {% for t in penalty_types %}<th class="num">{{ t }}<div class="hint">กรอกเอง</div></th>{% endfor %}
         <th>อื่น ๆ<div class="hint">รายละเอียด / จำนวนเงิน</div></th>
-        <th>สถานะ</th>
-        <th class="num sticky-r">รวม (บาท)</th>
+        <th>บิลเดือนนี้</th>
+        <th class="num sticky-r">ยอดบิลใหม่ (บาท)</th>
       </tr>
     </thead>
     <tbody>
-    {% for row in rows %}{% set u = row.unit %}{% set inv = row.inv %}{% set uid = u.id %}
-      <tr data-find="{{ u.unit_no }} {{ u.owner_name }} {{ u.tenant_name }}" class="{{ 'billed' if inv }}">
+    {% for row in rows %}{% set u = row.unit %}{% set uid = u.id %}
+      <tr data-find="{{ u.unit_no }} {{ u.owner_name }} {{ u.tenant_name }}" class="{{ 'billed' if row.invoices }}">
         <td class="sticky"><b>{{ u.unit_no }}</b> <a href="{{ url_for('admin.unit_history_page', unit_id=uid) }}" class="hist-link" data-history="{{ url_for('admin.unit_history_page', unit_id=uid, partial=1) }}">ประวัติ</a>
-          <div class="who">{{ u.tenant_name or u.owner_name }}</div>
-          {% if row.editable %}<input type="hidden" name="row_{{ uid }}" value="1">{% endif %}</td>
+          <div class="who">{{ u.tenant_name or u.owner_name }}</div><input type="hidden" name="row_{{ uid }}" value="1"></td>
         {% for col in cols %}{% set ct = col.ct %}{% set c = row.cells[ct.id] %}
-          {% set live_meter = col.kind == 'meter' and not inv and c.applies %}
-          <td class="chg{{ ' num' if not live_meter }}{{ ' meter' if live_meter }}{{ ' off' if c.applies and not c.included }}"
+          {% set live_meter = col.kind == 'meter' and not c.billed and c.applies %}
+          <td class="chg{{ ' num' if not live_meter }}{{ ' meter' if live_meter }}{{ ' is-billed' if c.billed }}{{ ' off' if c.applies and not c.included }}"
               data-amount="{{ c.amount or 0 }}"
               {% if live_meter %}data-method="{{ ct.method }}" data-rate="{{ ct.rate }}" data-min="{{ ct.min_charge }}" data-fee="{{ ct.fixed_fee }}" data-vat="{{ ct.vat_percent }}" data-tiers="{{ ct.tiers }}"{% endif %}>
-            {% if not c.applies %}<span class="muted">—</span>
+            {% if c.billed %}
+              {% if c.removable %}<label class="inc-box" title="เอาติ๊กออก = ลบรายการนี้ออกจากบิล {{ c.billed.invoice_no }}"><input type="checkbox" class="inc" name="inc_{{ ct.id }}_{{ uid }}" value="1" checked></label><input type="hidden" name="has_{{ ct.id }}_{{ uid }}" value="1">{% endif %}
+              <span class="amt-text">{{ c.amount|baht }}</span>
+              <div class="who"><span class="badge {{ 'paid' if c.billed.inv_status == 'paid' else 'partial' }}">{{ 'จ่ายแล้ว' if c.billed.inv_status == 'paid' else 'บิลแล้ว' }}</span>
+                {% if c.billed.meter_curr is not none %} {{ c.billed.meter_prev|num }} → {{ c.billed.meter_curr|num }}{% endif %}</div>
+            {% elif not c.applies %}<span class="muted">—</span>
             {% else %}
-              {% if row.editable %}<label class="inc-box" title="ติ๊กออก = ห้องนี้ไม่ต้องจ่าย{{ ct.name }}เดือนนี้"><input type="checkbox" class="inc" name="inc_{{ ct.id }}_{{ uid }}" value="1" {{ 'checked' if c.included }}></label>
-                {%- if not inv %}<input type="hidden" name="has_{{ ct.id }}_{{ uid }}" value="1">{% endif %}{% endif %}
-              {% if inv %}
-                <span class="amt-text">{{ c.amount|baht if c.amount is not none else 'รอจดมิเตอร์' }}</span>
-                {% if c.item and c.item.meter_curr is not none %}<div class="who">{{ c.item.meter_prev|num }} → {{ c.item.meter_curr|num }}</div>{% endif %}
-              {% elif live_meter %}
+              <label class="inc-box" title="ติ๊กออก = ห้องนี้ไม่ต้องจ่าย{{ ct.name }}เดือนนี้"><input type="checkbox" class="inc" name="inc_{{ ct.id }}_{{ uid }}" value="1" {{ 'checked' if c.included }}></label><input type="hidden" name="has_{{ ct.id }}_{{ uid }}" value="1">
+              {% if live_meter %}
                 <div class="mpair">
                   <input class="cell mprev" type="number" step="0.01" name="prev_{{ ct.id }}_{{ uid }}" value="{{ c.prev|num|replace(',', '') }}" title="เลขครั้งก่อน">
                   <input class="cell mcurr" type="number" step="0.01" name="curr_{{ ct.id }}_{{ uid }}" value="{{ (c.curr|num|replace(',', '')) if c.curr is not none }}" placeholder="ครั้งนี้" title="เลขครั้งนี้">
@@ -84,15 +85,17 @@
             {% endif %}
           </td>
         {% endfor %}
-        {% for t in penalty_types %}{% set v = row.penalties.get(t) %}
-          <td class="num extra" data-amount="{{ v or 0 }}">{% if row.editable %}<input class="cell money pen" type="number" step="0.01" min="0" name="pen_{{ loop.index0 }}_{{ uid }}" value="{{ '%.2f'|format(v) if v }}">{% else %}{{ v|baht if v else '—' }}{% endif %}</td>
+        {% for t in penalty_types %}{% set v = row.penalties.get(t) %}{% set b = row.billed_penalties.get(t) %}
+          <td class="num extra" data-amount="0"><input class="cell money pen" type="number" step="0.01" min="0" name="pen_{{ loop.index0 }}_{{ uid }}" value="{{ '%.2f'|format(v) if v }}">
+            {% if b %}<div class="who">บิลแล้ว {{ b|baht }}</div>{% endif %}</td>
         {% endfor %}
-        <td class="extra" data-amount="{{ row.other.amount or 0 }}">{% if inv %}<span class="num-text">{{ row.other.amount|baht if row.other.amount else '—' }}</span>
-            {% else %}<div class="mpair"><input class="cell desc" type="text" name="othd_{{ uid }}" value="{{ row.other.description }}" placeholder="รายการ"><input class="cell money" type="number" step="0.01" name="oth_{{ uid }}" value="{{ '%.2f'|format(row.other.amount) if row.other.amount }}"></div>{% endif %}</td>
-        <td>{% if inv %}<a href="{{ url_for('admin.invoice_detail', invoice_id=inv.id) }}">{{ status_badge(inv.status) }}</a>
-            {% elif row.missing %}<span class="badge partial" title="{{ row.missing|join(', ') }}">รอจดมิเตอร์</span>
-            {% else %}<span class="badge off">ยังไม่ออกบิล</span>{% endif %}</td>
-        <td class="num total sticky-r"><b>{{ row.total|baht }}</b></td>
+        <td class="extra" data-amount="0"><div class="mpair"><input class="cell desc" type="text" name="othd_{{ uid }}" value="{{ row.other.description }}" placeholder="รายการ"><input class="cell money" type="number" step="0.01" name="oth_{{ uid }}" value="{{ '%.2f'|format(row.other.amount) if row.other.amount }}"></div></td>
+        <td class="small">
+          {% for inv in row.invoices %}<div class="nowrap"><a href="{{ url_for('admin.invoice_detail', invoice_id=inv.id) }}">{{ status_badge(inv.status) }}</a> {{ inv.total|baht }}</div>{% endfor %}
+          {% if row.missing %}<span class="badge partial" title="{{ row.missing|join(', ') }}">รอจดมิเตอร์</span>
+          {% elif not row.invoices %}<span class="badge off">ยังไม่ออกบิล</span>{% endif %}
+        </td>
+        <td class="num total sticky-r"><b>{{ row.new_total|baht }}</b></td>
       </tr>
     {% endfor %}
     </tbody>
@@ -145,6 +148,7 @@
     tr.querySelectorAll('td.chg').forEach(function (td) {
       var inc = td.querySelector('input.inc');
       td.classList.toggle('off', !!inc && !inc.checked);
+      if (td.classList.contains('is-billed')) return;  // ออกบิลไปแล้ว ไม่นับในบิลใหม่
       if (inc && !inc.checked) { if (td.classList.contains('meter')) meterAmount(td); return; }
       if (td.classList.contains('meter')) { sum += meterAmount(td); return; }
       var money = td.querySelector('input.money');

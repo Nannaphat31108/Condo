@@ -49,9 +49,10 @@
   </form>
   {% endif %}
 
-  {% if admin and inv.status in ('unpaid', 'partial') %}
-  <h3 style="margin-top:1.25rem">เพิ่มเบี้ยปรับ / รายการอื่นในบิลนี้</h3>
-  {% set extra = items|selectattr('kind', 'ne', 'auto')|list %}
+  {% if admin and inv.status != 'void' %}
+  <h3 style="margin-top:1.25rem">แก้ไขรายการในบิลนี้</h3>
+  <p class="help">แก้ได้แม้ชำระแล้ว — เพิ่มรายการแล้วบิลจะกลับเป็น "ชำระบางส่วน" ให้รับชำระส่วนที่เพิ่ม · ลบรายการได้ถ้ายอดไม่ต่ำกว่าที่ชำระแล้ว</p>
+  {% set extra = items %}
   {% if extra %}
   <table style="margin-bottom:.75rem">
     {% for it in extra %}<tr><td>{{ it.description }} {% if it.kind == 'penalty' %}<span class="badge partial">เบี้ยปรับ</span>{% endif %}</td><td class="num">{{ it.amount|baht }}</td>

@@ -247,6 +247,9 @@ def insert_charge_type(db, ct):
 def migrate(db):
     """อัปเดตฐานข้อมูลเดิมให้มีคอลัมน์ใหม่"""
     add_columns(db, "units", [("unit_type", "TEXT NOT NULL DEFAULT 'room'")])
+    # บิลหลายเดือน (ค้างย้อนหลัง / จ่ายล่วงหน้า): ช่วงงวดที่บิล/รายการครอบคลุม
+    add_columns(db, "invoices", [("period_to", "TEXT")])
+    add_columns(db, "invoice_items", [("period_from", "TEXT"), ("period_to", "TEXT")])
     add_columns(db, "adhoc_charges", [("kind", "TEXT NOT NULL DEFAULT 'manual'")])
     if "unit_type" in add_columns(db, "charge_types", [("unit_type", "TEXT NOT NULL DEFAULT 'all'"),
                                                        ("manual_amount", "INTEGER NOT NULL DEFAULT 0")]):

@@ -23,6 +23,37 @@ def money(value):
     return round(float(value or 0) + 1e-9, 2)
 
 
+def months_between(start, end):
+    """['2026-10', '2026-11', ...] จาก start ถึง end (รวม)"""
+    out = []
+    y, m = (int(x) for x in start.split("-"))
+    ey, em = (int(x) for x in end.split("-"))
+    while (y, m) <= (ey, em) and len(out) < 1200:
+        out.append(f"{y}-{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
+def short_period(period):
+    """'2026-10' -> 'ต.ค. 69'"""
+    try:
+        y, m = (int(x) for x in period.split("-"))
+        return f"{THAI_MONTHS_SHORT[m]} {(y + 543) % 100:02d}"
+    except (ValueError, AttributeError, IndexError):
+        return period or ""
+
+
+def invoice_period_label(inv):
+    """งวดของบิล: 'ตุลาคม 2569' หรือบิลหลายเดือน 'ต.ค. 64 – ก.ย. 69'"""
+    try:
+        period_to = inv["period_to"]
+    except (KeyError, IndexError):
+        period_to = None
+    if period_to and period_to != inv["period"]:
+        return f"{short_period(inv['period'])} – {short_period(period_to)}"
+    return period_label(inv["period"])
+
+
 def period_label(period):
     """'2026-10' -> 'ตุลาคม 2569'"""
     try:
@@ -214,12 +245,34 @@ def load_exclusions(db, unit_id, period):
         "SELECT charge_type_id FROM bill_exclusions WHERE unit_id=? AND period=?", (unit_id, period))}
 
 
+def billed_charges(db, unit_id, period):
+    """ค่าบริการที่ออกบิลแล้วสำหรับงวดนี้ (รวมบิลหลายเดือนที่ครอบคลุมงวดนี้) {charge_type_id: รายการ}"""
+    rows = db.execute(
+        "SELECT ii.*, i.status AS inv_status, i.invoice_no, i.paid_amount AS inv_paid, i.total AS inv_total"
+        " FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id"
+        " WHERE i.unit_id=? AND i.status!='void' AND ii.charge_type_id IS NOT NULL"
+        " AND COALESCE(ii.period_from, i.period) <= ? AND COALESCE(ii.period_to, i.period_to, i.period) >= ?"
+        " ORDER BY i.id", (unit_id, period, period)).fetchall()
+    return {r["charge_type_id"]: r for r in rows}
+
+
+def invoices_covering(db, unit_id, period):
+    """บิลของห้องนี้ที่ครอบคลุมงวดนี้ (บิลรายเดือน และบิลหลายเดือน)"""
+    return db.execute(
+        "SELECT * FROM invoices WHERE unit_id=? AND status!='void' AND period<=? AND COALESCE(period_to, period)>=?"
+        " ORDER BY id", (unit_id, period, period)).fetchall()
+
+
 def build_unit_items(db, unit, period, charge_types, selections):
-    """สร้างรายการทั้งหมดของห้องในงวดนั้น คืน (items, missing_meters, adhoc_ids)"""
+    """รายการที่ยังไม่ได้ออกบิลของห้องในงวดนั้น คืน (items, missing_meters, adhoc_ids)
+
+    ค่าบริการที่ออกบิลไปแล้วในงวดนี้ (เช่น จ่ายค่าขยะไปก่อน หรือจ่ายล่วงหน้า) จะไม่ถูกเรียกเก็บซ้ำ
+    """
     items, missing = [], []
     excluded = load_exclusions(db, unit["id"], period)
+    billed = billed_charges(db, unit["id"], period)
     for ct in charge_types:
-        if ct["id"] in excluded or not charge_applies(ct, period, unit, selections.get(ct["id"], {})):
+        if ct["id"] in excluded or ct["id"] in billed or not charge_applies(ct, period, unit, selections.get(ct["id"], {})):
             continue
         item = charge_item(db, ct, unit, period, selections)
         if item is None:
@@ -251,7 +304,8 @@ def load_selections(db):
 
 
 ITEM_COLUMNS = ("charge_type_id", "description", "detail", "quantity", "unit_label", "unit_price", "amount",
-                "vat_amount", "sort_order", "kind", "meter_prev", "meter_curr", "meter_prev_date", "meter_curr_date")
+                "vat_amount", "sort_order", "kind", "meter_prev", "meter_curr", "meter_prev_date", "meter_curr_date",
+                "period_from", "period_to")
 
 
 def insert_item(db, invoice_id, item):
@@ -261,9 +315,28 @@ def insert_item(db, invoice_id, item):
     )
 
 
-def generate_invoices(db, period, settings, unit_ids=None):
-    """ออกใบแจ้งหนี้ให้ทุกห้อง (ที่ยังไม่มีบิลในงวดนี้)
+def create_invoice(db, unit, period, items, settings, issue_date, due_date, period_to=None, number_by=None):
+    """สร้างใบแจ้งหนี้ 1 ใบจากรายการที่เตรียมไว้ คืน (invoice_id, invoice_no)"""
+    subtotal = money(sum(i["amount"] for i in items))
+    vat = money(sum(i["vat_amount"] for i in items))
+    invoice_no = next_number(db, "invoices", "invoice_no", number_by or period)
+    cur = db.execute(
+        "INSERT INTO invoices (invoice_no, unit_id, unit_no, owner_name, tenant_name, period, period_to, issue_date,"
+        " due_date, subtotal, vat, total, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (invoice_no, unit["id"], unit["unit_no"], unit["owner_name"], unit["tenant_name"] or "", period,
+         period_to if period_to and period_to != period else None, issue_date, due_date,
+         subtotal, vat, money(subtotal + vat), settings.get("invoice_note", "")),
+    )
+    invoice_id = cur.lastrowid
+    for order, item in enumerate(sorted(items, key=lambda i: i["sort_order"])):
+        insert_item(db, invoice_id, {**item, "sort_order": order})
+    return invoice_id, invoice_no
 
+
+def generate_invoices(db, period, settings, unit_ids=None):
+    """ออกใบแจ้งหนี้ให้ทุกห้อง เฉพาะรายการที่ยังไม่ได้ออกบิลในงวดนี้
+
+    ห้องที่ออกบิลครบแล้วจะไม่ได้บิลซ้ำ ห้องที่มีรายการเพิ่ม (เช่น มาจ่ายค่าน้ำทีหลัง) จะได้บิลใบใหม่
     ห้องที่ยังไม่ได้จดมิเตอร์จะถูกข้ามไว้ก่อน เพื่อไม่ให้บิลผิด
     """
     charge_types = db.execute("SELECT * FROM charge_types ORDER BY sort_order, id").fetchall()
@@ -278,32 +351,15 @@ def generate_invoices(db, period, settings, unit_ids=None):
 
     result = {"created": [], "skipped_existing": [], "missing_meter": [], "empty": []}
     for unit in units:
-        exists = db.execute(
-            "SELECT 1 FROM invoices WHERE unit_id=? AND period=? AND status!='void'", (unit["id"], period)
-        ).fetchone()
-        if exists:
-            result["skipped_existing"].append(unit["unit_no"])
-            continue
         items, missing, adhoc_ids = build_unit_items(db, unit, period, charge_types, selections)
         if missing:
             result["missing_meter"].append(f"{unit['unit_no']} ({', '.join(missing)})")
             continue
         if not items:
-            result["empty"].append(unit["unit_no"])
+            has_bill = invoices_covering(db, unit["id"], period)
+            result["skipped_existing" if has_bill else "empty"].append(unit["unit_no"])
             continue
-        subtotal = money(sum(i["amount"] for i in items))
-        vat = money(sum(i["vat_amount"] for i in items))
-        invoice_no = next_number(db, "invoices", "invoice_no", period)
-        cur = db.execute(
-            "INSERT INTO invoices (invoice_no, unit_id, unit_no, owner_name, tenant_name, period, issue_date, due_date,"
-            " subtotal, vat, total, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (invoice_no, unit["id"], unit["unit_no"], unit["owner_name"], unit["tenant_name"] or "", period,
-             issue_date, due_date,
-             subtotal, vat, money(subtotal + vat), settings.get("invoice_note", "")),
-        )
-        invoice_id = cur.lastrowid
-        for order, item in enumerate(sorted(items, key=lambda i: i["sort_order"])):
-            insert_item(db, invoice_id, {**item, "sort_order": order})
+        invoice_id, invoice_no = create_invoice(db, unit, period, items, settings, issue_date, due_date)
         if adhoc_ids:
             db.execute(
                 f"UPDATE adhoc_charges SET invoice_id=? WHERE id IN ({','.join('?' * len(adhoc_ids))})",
