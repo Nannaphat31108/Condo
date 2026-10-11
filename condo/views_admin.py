@@ -93,7 +93,7 @@ def unit_form_data():
 @admin_required
 def units():
     q = request.args.get("q", "").strip()
-    unit_type = request.args.get("type", "")
+    unit_type = request.args.get("type", "room")
     sql = ("SELECT u.*, (SELECT COALESCE(SUM(total-paid_amount),0) FROM invoices i WHERE i.unit_id=u.id"
            " AND i.status IN ('unpaid','partial')) AS outstanding,"
            " (SELECT GROUP_CONCAT(username, ', ') FROM users WHERE unit_id=u.id) AS usernames FROM units u WHERE 1=1")
@@ -109,6 +109,25 @@ def units():
                             params).fetchall()
     counts = dict(get_db().execute("SELECT unit_type, COUNT(*) FROM units GROUP BY unit_type").fetchall())
     return render_template("admin/units.html", units=rows, q=q, unit_type=unit_type, counts=counts)
+
+
+@bp.route("/shops")
+@admin_required
+def shops():
+    """ร้านค้าอาคาร: รายชื่อร้าน ผู้เช่า ค่าเช่า และยอดค้าง"""
+    db = get_db()
+    rent_ids = [r["id"] for r in db.execute("SELECT id FROM charge_types WHERE manual_amount=1 AND unit_type='shop'")]
+    rows = db.execute(
+        "SELECT u.*, (SELECT COALESCE(SUM(total-paid_amount),0) FROM invoices i WHERE i.unit_id=u.id"
+        " AND i.status IN ('unpaid','partial')) AS outstanding FROM units u WHERE u.unit_type='shop'"
+        " ORDER BY u.active DESC, length(u.unit_no), u.unit_no").fetchall()
+    rent = {}
+    if rent_ids:
+        for r in db.execute(f"SELECT unit_id, SUM(amount_override) FROM charge_type_units WHERE charge_type_id IN"
+                            f" ({','.join('?' * len(rent_ids))}) GROUP BY unit_id", rent_ids):
+            rent[r[0]] = r[1]
+    charges = db.execute("SELECT * FROM charge_types WHERE unit_type IN ('shop','all') ORDER BY sort_order, id").fetchall()
+    return render_template("admin/shops.html", shops=rows, rent=rent, charges=charges)
 
 
 @bp.route("/units/new", methods=("GET", "POST"))
@@ -138,6 +157,9 @@ def unit_form(unit_id=None):
                     )
                     log_activity(g.user, f"เพิ่มห้อง {data['unit_no']}")
                 db.commit()
+                if data["unit_type"] == "shop":
+                    flash("บันทึกข้อมูลร้านค้าเรียบร้อย", "success")
+                    return redirect(url_for("admin.shops"))
                 flash("บันทึกข้อมูลห้องเรียบร้อย", "success")
                 return redirect(url_for("admin.units"))
             except sqlite3.IntegrityError:
@@ -1069,7 +1091,11 @@ def invoices():
     status = request.args.get("status", "")
     period = request.args.get("period", "")
     q = request.args.get("q", "").strip()
+    unit_type = request.args.get("type", "")
     sql, params = "SELECT * FROM invoices WHERE 1=1", []
+    if unit_type in billing.UNIT_TYPE_LABELS:
+        sql += " AND unit_id IN (SELECT id FROM units WHERE unit_type=?)"
+        params.append(unit_type)
     if status == "outstanding":
         sql += " AND status IN ('unpaid','partial')"
     elif status in billing.STATUS_LABELS:
@@ -1086,7 +1112,7 @@ def invoices():
         "total": sum(r["total"] for r in rows if r["status"] != "void"),
         "paid": sum(r["paid_amount"] for r in rows if r["status"] != "void"),
     }
-    return render_template("admin/invoices.html", invoices=rows, status=status, period=period, q=q, totals=totals)
+    return render_template("admin/invoices.html", invoices=rows, status=status, period=period, q=q, totals=totals, unit_type=unit_type)
 
 
 def load_invoice(invoice_id):
@@ -1130,8 +1156,11 @@ def payments_bulk():
     """รับชำระหลายห้องในหน้าเดียว"""
     db = get_db()
     period = get_period_arg()
+    unit_type = request.values.get("type", "") if request.values.get("type") in billing.UNIT_TYPE_LABELS else ""
     invoices_ = db.execute(
-        "SELECT * FROM invoices WHERE period=? AND status IN ('unpaid','partial') ORDER BY length(unit_no), unit_no", (period,)
+        "SELECT * FROM invoices WHERE period=? AND status IN ('unpaid','partial')"
+        + (" AND unit_id IN (SELECT id FROM units WHERE unit_type=?)" if unit_type else "")
+        + " ORDER BY length(unit_no), unit_no", (period, unit_type) if unit_type else (period,)
     ).fetchall()
     if request.method == "POST":
         paid_at = request.form.get("paid_at") or date.today().isoformat()
@@ -1158,9 +1187,9 @@ def payments_bulk():
             ids = [r[0] for r in db.execute(
                 f"SELECT id FROM payments WHERE receipt_no IN ({','.join('?' * len(receipts))})", receipts)]
             return redirect(url_for("admin.receipts_print", ids=",".join(map(str, ids)), print=1, period=period))
-        return redirect(url_for("admin.payments_bulk", period=period))
+        return redirect(url_for("admin.payments_bulk", period=period, type=unit_type or None))
     return render_template("admin/payments_bulk.html", period=period, invoices=invoices_,
-                           methods=PAYMENT_METHODS, today=date.today().isoformat())
+                           methods=PAYMENT_METHODS, today=date.today().isoformat(), unit_type=unit_type)
 
 
 @bp.route("/receipts/print")

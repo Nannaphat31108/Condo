@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% from "_macros.html" import csrf %}
 {% block content %}
-<h1>{{ 'แก้ไขห้อง ' ~ unit.unit_no if unit_id else 'เพิ่มห้อง' }}</h1>
+{% set is_shop = unit and unit.unit_type == 'shop' %}
+<h1>{% if is_shop %}{{ 'แก้ไขร้านค้า ' ~ unit.unit_no if unit_id else 'เพิ่มร้านค้าอาคาร' }}{% else %}{{ 'แก้ไขห้อง ' ~ unit.unit_no if unit_id else 'เพิ่มห้อง' }}{% endif %}</h1>
 <div class="card" style="max-width:760px">
   <form method="post">
     {{ csrf() }}
@@ -26,7 +27,7 @@
     <div class="field"><label>หมายเหตุ</label><textarea name="note" rows="2">{{ unit.note if unit else '' }}</textarea></div>
     <div class="field"><label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if not unit or unit.active }}> เปิดใช้งาน (ออกบิลให้ห้องนี้)</label></div>
     <button class="btn btn-primary">บันทึก</button>
-    <a class="btn" href="{{ url_for('admin.units') }}">ยกเลิก</a>
+    <a class="btn" href="{{ url_for('admin.shops') if is_shop else url_for('admin.units') }}">ยกเลิก</a>
   </form>
 </div>
 {% endblock %}

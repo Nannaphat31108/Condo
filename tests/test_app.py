@@ -792,3 +792,27 @@ def test_arrears_advance_and_rebill_same_month(app, client):
         assert (row["total"], row["status"]) == (70, "partial")
     page = client.get(f"/admin/invoices/{adv['id']}").get_data(as_text=True)
     assert "bill-stamp" not in page and "พ.ย. 69 – ต.ค. 70" in page
+
+
+def test_shops_section(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/new", {"unit_no": "26/1", "unit_type": "room", "active": "1"})
+    r = s.post("/admin/units/new", {"unit_no": "ร้าน 1", "unit_type": "shop", "tenant_name": "ร้านกาแฟ",
+                                    "tenant_phone": "0811111111", "active": "1"})
+    assert r.headers["Location"].endswith("/admin/shops")
+    page = client.get("/admin/shops").get_data(as_text=True)
+    assert "ร้านค้าอาคาร" in page and "ร้าน 1" in page and "ร้านกาแฟ" in page and "26/1" not in page
+    units_page = client.get("/admin/units").get_data(as_text=True)
+    assert ">26/1<" in units_page and "ร้าน 1" not in units_page
+    sheet = client.get("/admin/sheet?type=shop&period=2026-10").get_data(as_text=True)
+    assert "มิเตอร์ไฟ / ค่าเช่าพื้นที่ / มิเตอร์น้ำ" in sheet and "26/1" not in sheet
+    # คอลัมน์เรียง: ไฟ -> ค่าเช่า -> น้ำ
+    head = sheet[sheet.index("<thead>"):sheet.index("</thead>")]
+    i_e, i_r, i_w = (head.index(n) for n in ("ค่าไฟฟ้า (ร้านค้า)", "ค่าเช่าพื้นที่", "ค่าน้ำประปา (ร้านค้า)"))
+    assert i_e < i_r < i_w
+    room_sheet = client.get("/admin/sheet?period=2026-10").get_data(as_text=True)
+    assert "กรอกรวมทุกรายการ (ห้องชุด)" in room_sheet and "ร้าน 1" not in room_sheet
+    assert "บิลร้านค้าอาคาร" in client.get("/admin/invoices?type=shop").get_data(as_text=True)
+    assert "รับชำระร้านค้าอาคาร" in client.get("/admin/payments/bulk?type=shop").get_data(as_text=True)
+    assert "เพิ่มร้านค้าอาคาร" in client.get("/admin/units/new?type=shop").get_data(as_text=True)

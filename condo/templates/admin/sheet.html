@@ -1,16 +1,14 @@
 {% extends "base.html" %}
 {% from "_macros.html" import csrf, status_badge %}
-{% block title %}กรอกรวมทุกรายการ {{ period|period }}{% endblock %}
+{% set is_shop = unit_type == 'shop' %}
+{% block title %}{{ 'ร้านค้าอาคาร' if is_shop else 'กรอกรวมทุกรายการ' }} {{ period|period }}{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>กรอกรวมทุกรายการ งวด {{ period|period }}</h1>
+  <h1>{% if is_shop %}ร้านค้าอาคาร — มิเตอร์ไฟ / ค่าเช่าพื้นที่ / มิเตอร์น้ำ งวด {{ period|period }}{% else %}กรอกรวมทุกรายการ (ห้องชุด) งวด {{ period|period }}{% endif %}</h1>
   <form method="get" class="filters">
     <input type="hidden" name="type" value="{{ unit_type }}">
     <div class="field"><label>งวดเดือน</label><input type="month" name="period" value="{{ period }}" onchange="this.form.submit()"></div>
   </form>
-</div>
-<div class="tabs">
-  {% for k, v in UNIT_TYPE_LABELS.items() %}<a href="{{ url_for('admin.sheet', type=k, period=period) }}" class="{{ 'on' if unit_type == k }}">{{ v }} ({{ counts.get(k, 0) }})</a>{% endfor %}
 </div>
 <p class="muted small">เห็นทุกรายการของทุก{{ 'ร้าน' if unit_type == 'shop' else 'ห้อง' }}ในหน้าเดียว — กรอกเลขมิเตอร์ {% if cols|selectattr('kind', 'equalto', 'manual')|list %}ค่าเช่า {% endif %}เบี้ยปรับ และรายการอื่น ๆ แล้วกด
   <b>บันทึก</b> หรือ <b>บันทึกและออกใบแจ้งหนี้</b> ยอดรวมคำนวณให้ทันทีขณะพิมพ์<br>
@@ -18,8 +16,8 @@
   · กรอกรายการที่เหลือ (เช่น ค่าน้ำที่มาจ่ายทีหลัง) แล้วกด "บันทึกและออกใบแจ้งหนี้" จะได้บิลใบใหม่เฉพาะรายการที่ยังไม่ได้บิล</p>
 
 {% if not rows %}
-  <div class="flash info">ยังไม่มี{{ UNIT_TYPE_LABELS[unit_type] }} —
-    <a href="{{ url_for('admin.unit_form', type='shop') if unit_type == 'shop' else url_for('admin.unit_import') }}">เพิ่ม{{ UNIT_TYPE_LABELS[unit_type] }}</a></div>
+  <div class="flash info">ยังไม่มี{{ 'ร้านค้า' if is_shop else 'ห้องชุด' }} —
+    <a href="{{ url_for('admin.unit_form', type='shop') if is_shop else url_for('admin.unit_import') }}">{{ '+ เพิ่มร้านค้า' if is_shop else 'เพิ่มห้อง' }}</a></div>
 {% else %}
 <form method="post" id="sheet-form">
   {{ csrf() }}<input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="type" value="{{ unit_type }}">

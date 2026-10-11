@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% from "_macros.html" import status_badge %}
 {% block content %}
-<div class="page-head"><h1>ใบแจ้งหนี้ / รับชำระ</h1></div>
+<div class="page-head"><h1>{{ 'บิลร้านค้าอาคาร' if unit_type == 'shop' else 'ใบแจ้งหนี้ / รับชำระ' }}</h1></div>
 <div class="card">
   <form method="get" class="filters">
+    {% if unit_type %}<input type="hidden" name="type" value="{{ unit_type }}">{% endif %}
     <div class="field"><label>งวด</label><input type="month" name="period" value="{{ period }}"></div>
     <div class="field"><label>สถานะ</label>
       <select name="status">

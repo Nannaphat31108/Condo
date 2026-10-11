@@ -377,3 +377,4 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 @media print { .history-modal { display: none !important; } }
 .sheet td.is-billed { background: #f3f8f4; }
 .sheet td.is-billed.off { background: #fbf3f2; }
+.shop-charges { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
