@@ -816,3 +816,57 @@ def test_shops_section(app, client):
     assert "บิลร้านค้าอาคาร" in client.get("/admin/invoices?type=shop").get_data(as_text=True)
     assert "รับชำระร้านค้าอาคาร" in client.get("/admin/payments/bulk?type=shop").get_data(as_text=True)
     assert "เพิ่มร้านค้าอาคาร" in client.get("/admin/units/new?type=shop").get_data(as_text=True)
+
+
+def test_multi_bill_water_and_advance_months(app, client):
+    from condo import billing as b
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/new", {"unit_no": "26/5", "unit_type": "room", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        uid = db.execute("SELECT id FROM units").fetchone()[0]
+        cts = {r["name"]: r["id"] for r in db.execute("SELECT * FROM charge_types WHERE active=1")}
+    water = cts["ค่าน้ำประปา"]
+    fixed = (cts["ค่าส่วนกลาง"], cts["ค่ารักษามิเตอร์"], cts["ค่าขยะ"], cts["ค่าประกัน"])
+    cur = b.current_period()
+
+    # ค้างย้อนหลัง 12 เดือน พร้อมค่าน้ำตามเลขมาตร: 100 -> 160 = 60 หน่วย × 16 = 960 (ขั้นต่ำ 65×12 = 780)
+    p_from, p_to = b.add_months(cur, -12), b.add_months(cur, -1)
+    page = client.get(f"/admin/units/{uid}/multi-bill?from={p_from}&to={p_to}").get_data(as_text=True)
+    assert "ค่าน้ำประปา" in page and f'name="curr_{water}"' in page
+    s.post(f"/admin/units/{uid}/multi-bill", {"from": p_from, "to": p_to, f"inc_{water}": "1",
+                                              f"prev_{water}": "100", f"curr_{water}": "160"})
+    with app.app_context():
+        db = get_db()
+        inv = db.execute("SELECT * FROM invoices ORDER BY id DESC").fetchone()
+        assert inv["total"] == 960
+        item = db.execute("SELECT * FROM invoice_items WHERE invoice_id=?", (inv["id"],)).fetchone()
+        assert (item["meter_prev"], item["meter_curr"], item["quantity"]) == (100, 160, 60)
+        # เก็บเลขมาตรไว้ เดือนนี้เลขครั้งก่อนเริ่มที่ 160
+        assert db.execute("SELECT curr_reading FROM meter_readings WHERE unit_id=? AND period=?",
+                          (uid, p_to)).fetchone()[0] == 160
+    form = sheet_form(client, f"/admin/sheet?period={cur}&type=room")
+    assert form[f"prev_{water}_{uid}"] == "160"
+    # ใช้น้อย -> คิดขั้นต่ำต่อเดือน
+    s.post(f"/admin/units/{uid}/multi-bill", {"from": b.add_months(cur, -24), "to": b.add_months(cur, -13),
+                                              f"inc_{water}": "1", f"prev_{water}": "0", f"curr_{water}": "5"})
+    with app.app_context():
+        assert get_db().execute("SELECT total FROM invoices ORDER BY id DESC").fetchone()[0] == 65 * 12
+
+    # เดือนนี้ออกบิลรายเดือนไปแล้ว -> จ่ายล่วงหน้า 4 เดือน ต้องได้ 4 เดือน (เริ่มเดือนหน้า)
+    form = sheet_form(client, f"/admin/sheet?period={cur}&type=room")
+    form.update({f"curr_{water}_{uid}": "170", "action": "bill"})
+    s.post("/admin/sheet", form)
+    page = client.get(f"/admin/units/{uid}/multi-bill?ahead=4").get_data(as_text=True)
+    nxt, last = b.add_months(cur, 1), b.add_months(cur, 4)
+    assert f"{b.period_label(nxt)} – {b.period_label(last)}, 4 เดือน" in page
+    s.post(f"/admin/units/{uid}/multi-bill", {"from": nxt, "to": last, **{f"inc_{ct}": "1" for ct in fixed},
+                                              f"inc_{water}": "1", f"monthly_{water}": "65"})
+    with app.app_context():
+        adv = get_db().execute("SELECT * FROM invoices ORDER BY id DESC").fetchone()
+        assert (adv["period"], adv["period_to"]) == (nxt, last)
+        assert adv["total"] == 4 * 305 + 4 * 65
+    # เดือนที่จ่ายล่วงหน้าแล้ว ค่าน้ำไม่ถูกเก็บซ้ำในบิลรายเดือน
+    form = sheet_form(client, f"/admin/sheet?period={nxt}&type=room")
+    assert f"curr_{water}_{uid}" not in form

@@ -312,10 +312,10 @@ def unit_history(db, unit_id, limit=24):
 
 
 def multi_bill_lines(db, unit, months):
-    """ค่าบริการรายเดือน (ไม่รวมค่ามิเตอร์) ที่ยังไม่ได้บิลในช่วงเดือนที่เลือก"""
+    """ค่าบริการที่ยังไม่ได้บิลในช่วงเดือนที่เลือก (ค่าคงที่รายเดือน และค่ามิเตอร์ เช่น ค่าน้ำ)"""
     selections = billing.load_selections(db)
-    cts = db.execute("SELECT * FROM charge_types WHERE active=1 AND method NOT IN ('meter_rate','meter_tiered')"
-                     " AND unit_type IN ('all', ?) ORDER BY sort_order, id", (unit["unit_type"],)).fetchall()
+    cts = db.execute("SELECT * FROM charge_types WHERE active=1 AND unit_type IN ('all', ?) ORDER BY sort_order, id",
+                     (unit["unit_type"],)).fetchall()
     billed = {m: billing.billed_charges(db, unit["id"], m) for m in months}
     excluded = {(r["period"], r["charge_type_id"]) for r in db.execute(
         "SELECT * FROM bill_exclusions WHERE unit_id=?", (unit["id"],))}
@@ -324,9 +324,36 @@ def multi_bill_lines(db, unit, months):
         sel = selections.get(ct["id"], {})
         applies = [m for m in months if billing.charge_applies(ct, m, unit, sel) and (m, ct["id"]) not in excluded]
         due = [m for m in applies if ct["id"] not in billed[m]]
-        item = billing.compute_item(ct, unit, None, sel.get(unit["id"]))
-        lines.append({"ct": ct, "monthly": item["amount"], "months": due, "skipped": len(applies) - len(due)})
+        line = {"ct": ct, "months": due, "skipped": [m for m in applies if m not in due],
+                "meter": ct["method"] in billing.METER_METHODS}
+        if line["meter"]:
+            last = db.execute("SELECT curr_reading FROM meter_readings WHERE charge_type_id=? AND unit_id=?"
+                              " AND period<? ORDER BY period DESC LIMIT 1",
+                              (ct["id"], unit["id"], months[0] if months else "9999")).fetchone()
+            line["prev"] = last[0] if last else None
+            line["monthly"] = float(ct["min_charge"] or 0) + float(ct["fixed_fee"] or 0)  # เหมาจ่ายต่อเดือน
+        else:
+            line["monthly"] = billing.compute_item(ct, unit, None, sel.get(unit["id"]))["amount"]
+        lines.append(line)
     return lines
+
+
+def first_unbilled_period(db, unit, start):
+    """เดือนแรกตั้งแต่ start ที่ยังมีค่าบริการรายเดือนที่ยังไม่ได้บิล (ใช้กับ "จ่ายล่วงหน้า N เดือน")"""
+    selections = billing.load_selections(db)
+    cts = db.execute("SELECT * FROM charge_types WHERE active=1 AND unit_type IN ('all', ?)"
+                     " AND method NOT IN ('meter_rate','meter_tiered')", (unit["unit_type"],)).fetchall()
+    for m in billing.months_between(start, billing.add_months(start, 240)):
+        billed = billing.billed_charges(db, unit["id"], m)
+        if any(billing.charge_applies(ct, m, unit, selections.get(ct["id"], {})) and ct["id"] not in billed
+               for ct in cts):
+            return m
+    return start
+
+
+def range_label(due):
+    return billing.period_label(due[0]) if len(due) == 1 else \
+        f"{billing.short_period(due[0])} – {billing.short_period(due[-1])}"
 
 
 @bp.route("/units/<int:unit_id>/multi-bill", methods=("GET", "POST"))
@@ -336,8 +363,14 @@ def unit_multi_bill(unit_id):
     db = get_db()
     unit = get_or_404("SELECT * FROM units WHERE id=?", (unit_id,))
     current = billing.current_period()
-    p_from = request.values.get("from") if valid_period(request.values.get("from")) else current
-    p_to = request.values.get("to") if valid_period(request.values.get("to")) else p_from
+    ahead = request.values.get("ahead", type=int)
+    if ahead and 1 <= ahead <= 120:
+        # จ่ายล่วงหน้า N เดือน: เริ่มจากเดือนแรกที่ยังไม่ได้บิล ได้ครบ N เดือนเสมอ
+        p_from = first_unbilled_period(db, unit, current)
+        p_to = billing.add_months(p_from, ahead - 1)
+    else:
+        p_from = request.values.get("from") if valid_period(request.values.get("from")) else current
+        p_to = request.values.get("to") if valid_period(request.values.get("to")) else p_from
     if p_to < p_from:
         p_from, p_to = p_to, p_from
     months = billing.months_between(p_from, p_to)
@@ -345,24 +378,47 @@ def unit_multi_bill(unit_id):
 
     if request.method == "POST":
         f = request.form
-        items = []
+        items, readings = [], []
         for line in lines:
             ct, due = line["ct"], line["months"]
             if not f.get(f"inc_{ct['id']}") or not due:
                 continue
+            n = len(due)
+            label = range_label(due)
+            base = {"charge_type_id": ct["id"], "description": f"{ct['name']} ({label})", "sort_order": ct["sort_order"],
+                    "kind": "auto", "period_from": due[0], "period_to": due[-1]}
+            curr_raw = f.get(f"curr_{ct['id']}", "").strip() if line["meter"] else ""
+            if curr_raw:
+                # ค่ามิเตอร์ตามเลขมาตร: ใช้รวมทั้งช่วง ขั้นต่ำคิดต่อเดือน
+                prev, curr = to_float(f.get(f"prev_{ct['id']}")), to_float(curr_raw)
+                if curr < prev:
+                    flash(f"{ct['name']}: เลขมาตรครั้งนี้น้อยกว่าครั้งก่อน", "error")
+                    return redirect(url_for("admin.unit_multi_bill", unit_id=unit_id, **{"from": p_from, "to": p_to}))
+                usage = curr - prev
+                if ct["method"] == "meter_tiered":
+                    amount = billing.calc_tiered(usage, billing.parse_tiers(ct["tiers"]))[0]
+                else:
+                    amount = usage * float(ct["rate"] or 0)
+                amount += float(ct["fixed_fee"] or 0) * n
+                floor = float(ct["min_charge"] or 0) * n
+                detail = f"ใช้ {billing.fmt_num(usage)} {ct['unit_label'] or ''} ({n} เดือน)"
+                if floor and amount < floor:
+                    amount = floor
+                    detail += f" | ขั้นต่ำ {billing.fmt_num(ct['min_charge'])} × {n} เดือน"
+                amount = billing.money(amount)
+                items.append({**base, "detail": detail, "quantity": usage, "unit_label": ct["unit_label"] or "",
+                              "unit_price": float(ct["rate"] or 0), "amount": amount,
+                              "vat_amount": billing.money(amount * float(ct["vat_percent"] or 0) / 100),
+                              "meter_prev": prev, "meter_curr": curr, "meter_curr_date": date.today().isoformat()})
+                readings.append((ct, due[-1], prev, curr))
+                continue
             monthly = billing.money(to_float(f.get(f"monthly_{ct['id']}"), line["monthly"]))
             if monthly <= 0:
                 continue
-            amount = billing.money(monthly * len(due))
-            label = billing.period_label(due[0]) if len(due) == 1 else \
-                f"{billing.short_period(due[0])} – {billing.short_period(due[-1])}"
-            items.append({
-                "charge_type_id": ct["id"], "description": f"{ct['name']} ({label})",
-                "detail": f"{len(due)} เดือน × {monthly:,.2f}", "quantity": len(due), "unit_label": "เดือน",
-                "unit_price": monthly, "amount": amount,
-                "vat_amount": billing.money(amount * float(ct["vat_percent"] or 0) / 100),
-                "sort_order": ct["sort_order"], "kind": "auto", "period_from": due[0], "period_to": due[-1],
-            })
+            amount = billing.money(monthly * n)
+            items.append({**base, "detail": f"{n} เดือน × {monthly:,.2f}" + (" (เหมาจ่าย)" if line["meter"] else ""),
+                          "quantity": n, "unit_label": "เดือน", "unit_price": monthly, "amount": amount,
+                          "vat_amount": billing.money(amount * float(ct["vat_percent"] or 0) / 100)})
         lump = billing.money(to_float(f.get("lump_amount")))
         if lump:
             items.append({
@@ -378,6 +434,12 @@ def unit_multi_bill(unit_id):
         due_date = (date.today() + timedelta(days=int(settings.get("due_days") or 15))).isoformat()
         invoice_id, invoice_no = billing.create_invoice(db, unit, p_from, items, settings, today, due_date,
                                                         period_to=p_to, number_by=today)
+        # เก็บเลขมาตรล่าสุดไว้ เดือนถัดไปจะดึงเป็นเลขครั้งก่อนให้อัตโนมัติ
+        for ct, period, prev, curr in readings:
+            db.execute("INSERT INTO meter_readings (charge_type_id, unit_id, period, prev_reading, curr_reading, read_date)"
+                       " VALUES (?,?,?,?,?,?) ON CONFLICT (charge_type_id, unit_id, period) DO UPDATE SET"
+                       " prev_reading=excluded.prev_reading, curr_reading=excluded.curr_reading, read_date=excluded.read_date",
+                       (ct["id"], unit_id, period, prev, curr, today))
         log_activity(g.user, f"ออกบิลหลายเดือน {invoice_no} ห้อง {unit['unit_no']} ({p_from} ถึง {p_to})")
         if f.get("pay_now"):
             inv = db.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
@@ -394,8 +456,10 @@ def unit_multi_bill(unit_id):
         flash(f"ออกใบแจ้งหนี้ {invoice_no} แล้ว", "success")
         return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))
 
+    skipped = sorted({m for line in lines for m in line["skipped"]})
     return render_template("admin/unit_multi_bill.html", unit=unit, p_from=p_from, p_to=p_to, months=months,
-                           lines=lines, current=current, today=date.today().isoformat(), methods=PAYMENT_METHODS)
+                           lines=lines, current=current, today=date.today().isoformat(), methods=PAYMENT_METHODS,
+                           ahead=ahead, skipped=skipped)
 
 
 @bp.route("/units/<int:unit_id>/history")

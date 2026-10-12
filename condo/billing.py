@@ -23,6 +23,13 @@ def money(value):
     return round(float(value or 0) + 1e-9, 2)
 
 
+def add_months(period, n):
+    """'2026-10' + 3 -> '2027-01'"""
+    y, m = (int(x) for x in period.split("-"))
+    total = y * 12 + (m - 1) + n
+    return f"{total // 12}-{total % 12 + 1:02d}"
+
+
 def months_between(start, end):
     """['2026-10', '2026-11', ...] จาก start ถึง end (รวม)"""
     out = []
