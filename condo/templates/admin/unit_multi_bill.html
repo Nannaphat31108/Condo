@@ -58,12 +58,21 @@
             {% if not l.months and not l.skipped %}ไม่มีเดือนที่ต้องเก็บ{% endif %}</td>
         </tr>
       {% endfor %}
+        {% for t in penalty_types %}
+        <tr>
+          <td></td>
+          <td colspan="2"><b class="penalty-name">{{ t }}</b> <span class="muted small">กรอกเอง (ถ้ามี)</span></td>
+          <td></td>
+          <td class="num"><input class="cell extra-amt" type="number" step="0.01" min="0" name="pen_{{ loop.index0 }}" placeholder="0.00"></td>
+          <td></td>
+        </tr>
+        {% endfor %}
         <tr>
           <td></td>
           <td colspan="2"><label>ยอดค้างยกมา / อื่น ๆ <span class="muted small">(เช่น ค้างค่าน้ำย้อนหลัง หรือไม่ทราบรายละเอียดว่ากี่ปี)</span></label>
             <input type="text" name="lump_description" placeholder="ยอดค้างชำระยกมา"></td>
           <td></td>
-          <td class="num"><input class="cell" type="number" step="0.01" name="lump_amount" id="lump" placeholder="0.00"></td>
+          <td class="num"><input class="cell extra-amt" type="number" step="0.01" name="lump_amount" id="lump" placeholder="0.00"></td>
           <td></td>
         </tr>
       </tbody>
@@ -112,7 +121,7 @@
       tr.style.opacity = on.checked ? 1 : .45;
       if (on.checked) total += v;
     });
-    total += parseFloat(document.getElementById('lump').value) || 0;
+    form.querySelectorAll('input.extra-amt').forEach(function (i) { total += parseFloat(i.value) || 0; });
     document.getElementById('grand-total').innerHTML = '<b>' + fmt(total) + '</b>';
   }
   form.addEventListener('input', calc); form.addEventListener('change', calc); calc();

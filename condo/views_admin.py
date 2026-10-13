@@ -419,6 +419,13 @@ def unit_multi_bill(unit_id):
             items.append({**base, "detail": f"{n} เดือน × {monthly:,.2f}" + (" (เหมาจ่าย)" if line["meter"] else ""),
                           "quantity": n, "unit_label": "เดือน", "unit_price": monthly, "amount": amount,
                           "vat_amount": billing.money(amount * float(ct["vat_percent"] or 0) / 100)})
+        for idx, name in enumerate(penalty_type_list()):
+            amount = billing.money(to_float(f.get(f"pen_{idx}")))
+            if amount > 0:
+                items.append({
+                    "charge_type_id": None, "description": name, "detail": "", "quantity": 1, "unit_label": "",
+                    "unit_price": amount, "amount": amount, "vat_amount": 0.0, "sort_order": 950, "kind": "penalty",
+                })
         lump = billing.money(to_float(f.get("lump_amount")))
         if lump:
             items.append({
@@ -459,7 +466,7 @@ def unit_multi_bill(unit_id):
     skipped = sorted({m for line in lines for m in line["skipped"]})
     return render_template("admin/unit_multi_bill.html", unit=unit, p_from=p_from, p_to=p_to, months=months,
                            lines=lines, current=current, today=date.today().isoformat(), methods=PAYMENT_METHODS,
-                           ahead=ahead, skipped=skipped)
+                           ahead=ahead, skipped=skipped, penalty_types=penalty_type_list())
 
 
 @bp.route("/units/<int:unit_id>/history")

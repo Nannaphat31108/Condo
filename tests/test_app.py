@@ -870,3 +870,27 @@ def test_multi_bill_water_and_advance_months(app, client):
     # เดือนที่จ่ายล่วงหน้าแล้ว ค่าน้ำไม่ถูกเก็บซ้ำในบิลรายเดือน
     form = sheet_form(client, f"/admin/sheet?period={nxt}&type=room")
     assert f"curr_{water}_{uid}" not in form
+
+
+def test_multi_bill_penalties(app, client):
+    from condo import billing as b
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/new", {"unit_no": "26/7", "unit_type": "room", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        uid = db.execute("SELECT id FROM units").fetchone()[0]
+        common = db.execute("SELECT id FROM charge_types WHERE name='ค่าส่วนกลาง'").fetchone()[0]
+    cur = b.current_period()
+    p_from, p_to = b.add_months(cur, -3), b.add_months(cur, -1)
+    page = client.get(f"/admin/units/{uid}/multi-bill?from={p_from}&to={p_to}").get_data(as_text=True)
+    assert 'name="pen_0"' in page and "เบี้ยปรับค่าน้ำ" in page
+    s.post(f"/admin/units/{uid}/multi-bill", {"from": p_from, "to": p_to, f"inc_{common}": "1",
+                                              "pen_0": "150", "pen_1": "30"})
+    with app.app_context():
+        db = get_db()
+        inv = db.execute("SELECT * FROM invoices").fetchone()
+        assert inv["total"] == 3 * 250 + 150 + 30
+        pens = dict(db.execute("SELECT description, amount FROM invoice_items WHERE invoice_id=? AND kind='penalty'",
+                               (inv["id"],)).fetchall())
+        assert pens == {"เบี้ยปรับ": 150, "เบี้ยปรับค่าน้ำ": 30}
