@@ -9,6 +9,7 @@
   </div>
 </div>
 {% include "admin/_report_tabs.html" %}
+<div class="report-daily">
 
 <div class="grid grid-4" style="margin-bottom:1.25rem">
   <div class="stat"><div class="label">รับเงินวันนี้</div><div class="value">{{ rows|sum(attribute='p.amount')|baht }}</div><div class="sub">บาท</div></div>
@@ -18,28 +19,28 @@
   <div class="stat"><div class="label">ออกใบแจ้งหนี้วันนี้</div><div class="value">{{ issued.cnt }}</div><div class="sub">ยอด {{ issued.total|baht }} บาท</div></div>
 </div>
 
-<div class="grid grid-2">
+<div>
   <div class="card">
     <h2>รับเงินแยกตามรายการ</h2>
-    <div class="table-wrap"><table>
+    <div class="table-wrap"><table class="by-item">
       <thead><tr><th>รายการ</th><th class="num">จำนวนเงิน (บาท)</th></tr></thead>
       <tbody>{% for name in item_cols %}<tr><td>{{ name }}</td><td class="num">{{ by_item[name]|baht }}</td></tr>
       {% else %}<tr><td colspan="2" class="muted">วันนี้ยังไม่มีการรับเงิน</td></tr>{% endfor %}</tbody>
       {% if item_cols %}<tfoot><tr><td>รวม</td><td class="num">{{ by_item.values()|sum|baht }}</td></tr></tfoot>{% endif %}
     </table></div>
   </div>
-  <div class="card">
+</div>
+
+<div class="card receipts-card">
     <h2>ใบเสร็จวันนี้ ({{ rows|length }})</h2>
     <div class="table-wrap"><table>
       <thead><tr><th>เลขที่</th><th>ห้อง</th><th>ชื่อ</th><th>ช่องทาง</th><th class="num">จำนวนเงิน</th></tr></thead>
       <tbody>{% for r in rows %}{% set p = r.p %}
         <tr><td><a href="{{ url_for('admin.receipt', payment_id=p.id) }}">{{ p.receipt_no }}</a></td><td>{{ p.unit_no }}</td>
-          <td class="small">{{ p.tenant_name or p.owner_name or '-' }}</td><td class="small">{{ p.method }}</td><td class="num">{{ p.amount|baht }}</td></tr>
+          <td class="small name-cell" title="{{ p.tenant_name or p.owner_name or '' }}">{{ p.tenant_name or p.owner_name or '-' }}</td><td class="small">{{ p.method }}</td><td class="num">{{ p.amount|baht }}</td></tr>
       {% else %}<tr><td colspan="5" class="muted">ไม่มี</td></tr>{% endfor %}</tbody>
     </table></div>
   </div>
-</div>
-
 <div class="card">
   <div class="page-head" style="margin-bottom:.5rem">
     <h2 style="margin:0">รายวันทั้งเดือน {{ month|period }}</h2>
@@ -58,6 +59,7 @@
     </tbody>
     {% if days %}<tfoot><tr><td>รวมทั้งเดือน</td><td class="num">{{ month_count }}</td>{% for c in cols %}<td class="num">{{ month_totals[c]|baht }}</td>{% endfor %}<td class="num">{{ month_total|baht }}</td></tr></tfoot>{% endif %}
   </table></div>
-  <p class="help">ใบเสร็จที่จ่ายบางส่วน แบ่งยอดตามสัดส่วนรายการในบิล</p>
+  <p class="help">ใบเสร็จที่จ่ายบางส่วน แบ่งยอดตามสัดส่วนรายการในบิล · บิลหลายเดือน (ค้างย้อนหลัง/ล่วงหน้า) รวมอยู่ในหัวข้อเดียวกับค่าบริการ</p>
+</div>
 </div>
 {% endblock %}

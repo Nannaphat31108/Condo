@@ -130,6 +130,20 @@ def shops():
     return render_template("admin/shops.html", shops=rows, rent=rent, charges=charges)
 
 
+@bp.route("/shops/reset", methods=("POST",))
+@admin_required
+def shops_reset():
+    """รีเซ็ตข้อมูลร้านค้าทั้งหมด (เก็บร้านไว้)"""
+    db = get_db()
+    shops_ = db.execute("SELECT id FROM units WHERE unit_type='shop'").fetchall()
+    for u in shops_:
+        reset_unit_data(db, u["id"], bool(request.form.get("clear_contacts")), bool(request.form.get("clear_rent")))
+    log_activity(g.user, f"รีเซ็ตข้อมูลร้านค้าทั้งหมด {len(shops_)} ร้าน")
+    db.commit()
+    flash(f"รีเซ็ตข้อมูลร้านค้าแล้ว {len(shops_)} ร้าน (ลบบิล ใบเสร็จ เลขมิเตอร์ และรายการเพิ่มเติม)", "success")
+    return redirect(url_for("admin.shops"))
+
+
 @bp.route("/units/new", methods=("GET", "POST"))
 @bp.route("/units/<int:unit_id>/edit", methods=("GET", "POST"))
 @admin_required
@@ -148,6 +162,9 @@ def unit_form(unit_id=None):
                         " tenant_name=?, tenant_phone=?, note=?, active=? WHERE id=?",
                         (*[data[f] for f in UNIT_FIELDS], data["active"], unit_id),
                     )
+                    # ชื่อที่แก้ให้ขึ้นในบิล/ใบเสร็จ/รายงานเดิมของห้องนี้ด้วย
+                    db.execute("UPDATE invoices SET unit_no=?, owner_name=?, tenant_name=? WHERE unit_id=?",
+                               (data["unit_no"], data["owner_name"], data["tenant_name"], unit_id))
                     log_activity(g.user, f"แก้ไขห้อง {data['unit_no']}")
                 else:
                     db.execute(
@@ -479,8 +496,11 @@ def unit_history_page(unit_id):
     return render_template(template, unit=unit, history=unit_history(db, unit_id))
 
 
-def reset_unit_data(db, unit_id, clear_contacts=False):
+def reset_unit_data(db, unit_id, clear_contacts=False, clear_rent=False):
     """ล้างข้อมูลการเงินของห้อง (บิล ใบเสร็จ มิเตอร์ รายการเพิ่มเติม) แต่เก็บห้องไว้"""
+    if clear_rent:  # ยอดที่กรอกเองรายห้อง/ร้าน เช่น ค่าเช่าพื้นที่
+        db.execute("DELETE FROM charge_type_units WHERE unit_id=? AND charge_type_id IN"
+                   " (SELECT id FROM charge_types WHERE manual_amount=1)", (unit_id,))
     db.execute("DELETE FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE unit_id=?)", (unit_id,))
     db.execute("DELETE FROM adhoc_charges WHERE unit_id=?", (unit_id,))
     db.execute("DELETE FROM invoices WHERE unit_id=?", (unit_id,))
@@ -496,9 +516,12 @@ def reset_unit_data(db, unit_id, clear_contacts=False):
 def unit_reset(unit_id):
     db = get_db()
     unit = get_or_404("SELECT * FROM units WHERE id=?", (unit_id,))
-    reset_unit_data(db, unit_id, bool(request.form.get("clear_contacts")))
+    reset_unit_data(db, unit_id, bool(request.form.get("clear_contacts")), bool(request.form.get("clear_rent")))
     log_activity(g.user, f"รีเซ็ตข้อมูลห้อง {unit['unit_no']}")
     db.commit()
+    if request.form.get("next") == "shops":
+        flash(f"รีเซ็ตข้อมูลร้าน {unit['unit_no']} แล้ว", "success")
+        return redirect(url_for("admin.shops"))
     flash(f"รีเซ็ตข้อมูลห้อง {unit['unit_no']} แล้ว (ลบบิล ใบเสร็จ เลขมิเตอร์ และรายการเพิ่มเติมทั้งหมด)", "success")
     return redirect(url_for("admin.unit_detail", unit_id=unit_id))
 
@@ -1468,15 +1491,20 @@ def collections_between(db, start, end):
     (จ่ายครบ = ได้ยอดตรงตามรายการ) และปัดเศษให้ผลรวมตรงกับยอดที่รับจริง
     """
     payments = db.execute(
-        "SELECT p.*, i.invoice_no, i.unit_no, i.owner_name, i.tenant_name, i.period, i.total AS invoice_total"
-        " FROM payments p JOIN invoices i ON i.id=p.invoice_id WHERE p.paid_at BETWEEN ? AND ?"
+        "SELECT p.*, i.invoice_no, COALESCE(u.unit_no, i.unit_no) AS unit_no,"
+        " COALESCE(u.owner_name, i.owner_name) AS owner_name, COALESCE(u.tenant_name, i.tenant_name) AS tenant_name,"
+        " i.period, i.total AS invoice_total"
+        " FROM payments p JOIN invoices i ON i.id=p.invoice_id LEFT JOIN units u ON u.id=i.unit_id"
+        " WHERE p.paid_at BETWEEN ? AND ?"
         " ORDER BY p.paid_at, p.id", (start, end)).fetchall()
     items_cache, rows = {}, []
     for p in payments:
         if p["invoice_id"] not in items_cache:
             items_cache[p["invoice_id"]] = db.execute(
-                "SELECT description, amount + vat_amount AS amount FROM invoice_items WHERE invoice_id=?"
-                " ORDER BY sort_order, id", (p["invoice_id"],)).fetchall()
+                # บิลหลายเดือน: รวมเข้าหัวข้อเดียวกับค่าบริการ (ไม่แยกบรรทัดตามช่วงเดือน)
+                "SELECT COALESCE(c.name, ii.description) AS description, ii.amount + ii.vat_amount AS amount"
+                " FROM invoice_items ii LEFT JOIN charge_types c ON c.id=ii.charge_type_id WHERE ii.invoice_id=?"
+                " ORDER BY ii.sort_order, ii.id", (p["invoice_id"],)).fetchall()
         items = items_cache[p["invoice_id"]]
         ratio = p["amount"] / p["invoice_total"] if p["invoice_total"] else 0
         parts = {}

@@ -28,7 +28,10 @@
       <td class="num">{% if u.outstanding %}<span style="color:var(--danger)">{{ u.outstanding|baht }}</span>{% else %}-{% endif %}</td>
       <td>{% if u.active %}<span class="badge on">ใช้งาน</span>{% else %}<span class="badge off">ปิด</span>{% endif %}</td>
       <td class="nowrap"><a class="btn btn-sm" href="{{ url_for('admin.unit_history_page', unit_id=u.id) }}" data-history="{{ url_for('admin.unit_history_page', unit_id=u.id, partial=1) }}">ประวัติ</a>
-        <a class="btn btn-sm" href="{{ url_for('admin.unit_form', unit_id=u.id, type='shop') }}">แก้ไข</a></td>
+        <a class="btn btn-sm" href="{{ url_for('admin.unit_form', unit_id=u.id, type='shop') }}">แก้ไข</a>
+        <form method="post" action="{{ url_for('admin.unit_reset', unit_id=u.id) }}" class="inline" data-confirm="รีเซ็ตข้อมูลร้าน {{ u.unit_no }} ? (ลบบิล ใบเสร็จ เลขมิเตอร์ และค่าเช่าที่กรอกไว้)">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="next" value="shops"><input type="hidden" name="clear_rent" value="1">
+          <button class="btn btn-sm btn-danger">รีเซ็ต</button></form></td>
     </tr>
   {% else %}
     <tr><td colspan="7" class="muted">ยังไม่มีร้านค้า — <a href="{{ url_for('admin.unit_form', type='shop') }}">+ เพิ่มร้านค้า</a></td></tr>
@@ -36,4 +39,16 @@
   </tbody>
 </table></div>
 <p class="help">ค่าเช่าพื้นที่ของแต่ละร้านกรอก/แก้ได้ที่หน้า "มิเตอร์ไฟ / ค่าเช่า / มิเตอร์น้ำ" ระบบจำไว้ใช้ทุกเดือน</p></div>
+{% if shops %}
+<div class="card">
+  <h2>รีเซ็ตข้อมูลร้านค้าทั้งหมด</h2>
+  <p class="small">ลบใบแจ้งหนี้ ใบเสร็จ เลขมิเตอร์ เบี้ยปรับ และรายการเพิ่มเติมของทุกร้าน (เก็บร้านไว้) เพื่อเริ่มใส่ข้อมูลจริงใหม่ — กู้คืนไม่ได้</p>
+  <form method="post" action="{{ url_for('admin.shops_reset') }}" data-confirm="ยืนยันรีเซ็ตข้อมูลร้านค้าทั้งหมด {{ shops|length }} ร้าน ? กู้คืนไม่ได้">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <div class="field"><label class="check"><input type="checkbox" name="clear_rent" value="1" checked> ล้างค่าเช่าพื้นที่ที่กรอกไว้ด้วย</label>
+      <label class="check"><input type="checkbox" name="clear_contacts" value="1"> ล้างชื่อผู้เช่า / เบอร์โทรด้วย</label></div>
+    <button class="btn btn-danger">รีเซ็ตข้อมูลร้านค้าทั้งหมด</button>
+  </form>
+</div>
+{% endif %}
 {% endblock %}

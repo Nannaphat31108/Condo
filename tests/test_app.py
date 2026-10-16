@@ -894,3 +894,49 @@ def test_multi_bill_penalties(app, client):
         pens = dict(db.execute("SELECT description, amount FROM invoice_items WHERE invoice_id=? AND kind='penalty'",
                                (inv["id"],)).fetchall())
         assert pens == {"เบี้ยปรับ": 150, "เบี้ยปรับค่าน้ำ": 30}
+
+
+def test_name_edit_report_compact_and_shop_reset(app, client):
+    from condo import billing as b
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/new", {"unit_no": "26/9", "unit_type": "room", "active": "1",
+                                "owner_name": "นางสาวเครือวัลย์ เอี่ยมเกตุแก้วยาวมากมาก"})
+    s.post("/admin/units/new", {"unit_no": "ร้าน 1", "unit_type": "shop", "tenant_name": "ร้านกาแฟ", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        ids = {r["unit_no"]: r["id"] for r in db.execute("SELECT * FROM units")}
+        common = db.execute("SELECT id FROM charge_types WHERE name='ค่าส่วนกลาง'").fetchone()[0]
+        rent = db.execute("SELECT id FROM charge_types WHERE name='ค่าเช่าพื้นที่'").fetchone()[0]
+    cur = b.current_period()
+    s.post(f"/admin/units/{ids['26/9']}/multi-bill", {"from": b.add_months(cur, -3), "to": b.add_months(cur, -1),
+                                                      f"inc_{common}": "1", "pay_now": "1", "paid_at": "2026-10-16"})
+    # แก้ชื่อให้สั้นลง -> บิลเดิมและรายงานใช้ชื่อใหม่
+    s.post(f"/admin/units/{ids['26/9']}/edit", {"unit_no": "26/9", "unit_type": "room", "owner_name": "คุณเครือวัลย์",
+                                                "active": "1"})
+    with app.app_context():
+        assert get_db().execute("SELECT owner_name FROM invoices WHERE unit_id=?", (ids["26/9"],)).fetchone()[0] \
+            == "คุณเครือวัลย์"
+    page = client.get("/admin/reports/daily?date=2026-10-16").get_data(as_text=True)
+    assert "คุณเครือวัลย์" in page and "ยาวมากมาก" not in page and 'class="small name-cell"' in page
+    # บิลหลายเดือนรวมในหัวข้อ "ค่าส่วนกลาง" ไม่แยกบรรทัดตามช่วงเดือน
+    assert "<td>ค่าส่วนกลาง</td>" in page and "ค่าส่วนกลาง (" not in page.split("รับเงินแยกตามรายการ")[1].split("</table>")[0]
+
+    # ร้านค้า: กรอกค่าเช่าแล้วรีเซ็ตทั้งหมด -> ค่าเช่าและบิลหายหมด
+    form = sheet_form(client, f"/admin/sheet?period={cur}&type=shop")
+    form.update({f"amt_{rent}_{ids['ร้าน 1']}": "3000", "action": "bill"})
+    with app.app_context():
+        meters = [r[0] for r in get_db().execute("SELECT id FROM charge_types WHERE unit_type='shop'"
+                                                  " AND method LIKE 'meter%'")]
+    for ct in meters:   # เดือนนี้ยังไม่จดมิเตอร์ร้าน -> ไม่เก็บค่าน้ำ/ไฟ
+        form.pop(f"inc_{ct}_{ids['ร้าน 1']}", None)
+    s.post("/admin/sheet", form)
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM invoices WHERE unit_id=?", (ids["ร้าน 1"],)).fetchone()[0] == 1
+    assert "รีเซ็ตข้อมูลร้านค้าทั้งหมด" in client.get("/admin/shops").get_data(as_text=True)
+    s.post("/admin/shops/reset", {"clear_rent": "1"})
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT COUNT(*) FROM invoices WHERE unit_id=?", (ids["ร้าน 1"],)).fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM charge_type_units WHERE unit_id=?", (ids["ร้าน 1"],)).fetchone()[0] == 0
+        assert db.execute("SELECT COUNT(*) FROM invoices WHERE unit_id=?", (ids["26/9"],)).fetchone()[0] == 1
