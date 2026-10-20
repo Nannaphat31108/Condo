@@ -940,3 +940,51 @@ def test_name_edit_report_compact_and_shop_reset(app, client):
         assert db.execute("SELECT COUNT(*) FROM invoices WHERE unit_id=?", (ids["ร้าน 1"],)).fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM charge_type_units WHERE unit_id=?", (ids["ร้าน 1"],)).fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM invoices WHERE unit_id=?", (ids["26/9"],)).fetchone()[0] == 1
+
+
+def test_expenses_and_income_expense_summary(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/new", {"unit_no": "26/1", "unit_type": "room", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE charge_types SET active=0 WHERE method LIKE 'meter%'")
+        db.commit()
+    s.post("/admin/billing", {"period": "2026-10"})
+    with app.app_context():
+        inv = get_db().execute("SELECT * FROM invoices").fetchone()
+    s.post(f"/admin/invoices/{inv['id']}/pay", {"amount": "305", "paid_at": "2026-10-05"})
+    # รายจ่าย
+    s.post("/admin/expenses", {"expense_date": "2026-10-05", "category": "common", "item": "ค่าไฟฟ้าส่วนกลาง",
+                               "amount": "1200", "payee": "กฟน."})
+    s.post("/admin/expenses", {"expense_date": "2026-10-20", "category": "special", "item": "ค่าซ่อมแซม",
+                               "amount": "500", "description": "ซ่อมปั๊มน้ำ"})
+    s.post("/admin/expenses", {"expense_date": "2025-12-31", "category": "common", "item": "ค่าทำความสะอาด",
+                               "amount": "300"})
+    r = s.post("/admin/expenses", {"expense_date": "2026-10-20", "category": "common", "item": "", "amount": "10"},
+               follow_redirects=True)
+    assert "กรุณากรอกรายการ" in r.get_data(as_text=True)
+    page = client.get("/admin/expenses?month=2026-10").get_data(as_text=True)
+    assert "ค่าไฟฟ้าส่วนกลาง" in page and "ซ่อมปั๊มน้ำ" in page and "1,700.00" in page
+    # สรุปรายวัน / รายเดือน / รายปี
+    day = client.get("/admin/expenses/summary?view=day&month=2026-10").get_data(as_text=True)
+    assert "5 ตุลาคม 2569" in day and "-895.00" in day and "-1,395.00" in day     # 305 - 1200 - 500
+    month = client.get("/admin/expenses/summary?view=month&year=2026").get_data(as_text=True)
+    assert "ตุลาคม 2569" in month and "1,200.00" in month and "500.00" in month
+    year = client.get("/admin/expenses/summary?view=year").get_data(as_text=True)
+    assert "พ.ศ. 2568" in year and "พ.ศ. 2569" in year
+    csv_text = client.get("/admin/expenses/summary?view=day&month=2026-10&export=csv").get_data(as_text=True)
+    assert "2026-10-05,305.0,1200.0,0.0,1200.0,-895.0" in csv_text
+    # รายงานรายวันมีรายจ่าย + คงเหลือสุทธิ
+    daily = client.get("/admin/reports/daily?date=2026-10-05").get_data(as_text=True)
+    assert "รายจ่ายวันนี้ (1)" in daily and "-895.00" in daily
+    # แก้ไข / ลบ
+    with app.app_context():
+        eid = get_db().execute("SELECT id FROM expenses WHERE item='ค่าซ่อมแซม'").fetchone()[0]
+    s.post(f"/admin/expenses/{eid}/edit", {"expense_date": "2026-10-20", "category": "special", "item": "ค่าซ่อมแซม",
+                                           "amount": "650"})
+    with app.app_context():
+        assert get_db().execute("SELECT amount FROM expenses WHERE id=?", (eid,)).fetchone()[0] == 650
+    s.post(f"/admin/expenses/{eid}/delete", {})
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM expenses").fetchone()[0] == 2

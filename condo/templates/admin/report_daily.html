@@ -31,6 +31,26 @@
   </div>
 </div>
 
+{% set exp_common = day_expenses|selectattr('category', 'equalto', 'common')|sum(attribute='amount') %}
+{% set exp_special = day_expenses|selectattr('category', 'equalto', 'special')|sum(attribute='amount') %}
+{% set income = rows|sum(attribute='p.amount') %}
+<div class="card">
+  <h2>รายจ่ายวันนี้ ({{ day_expenses|length }}) <a class="small no-print" href="{{ url_for('admin.expenses', month=day[:7]) }}" style="font-weight:400">บันทึกรายจ่าย →</a></h2>
+  {% if day_expenses %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>หมวด</th><th>รายการ</th><th>รายละเอียด</th><th>จ่ายให้</th><th class="num">จำนวนเงิน</th></tr></thead>
+    <tbody>{% for e in day_expenses %}<tr><td class="small">{{ 'ส่วนกลาง' if e.category == 'common' else 'พิเศษ' }}</td><td>{{ e.item }}</td>
+      <td class="small name-cell">{{ e.description }}</td><td class="small name-cell">{{ e.payee }}</td><td class="num">{{ e.amount|baht }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="muted small">ไม่มีรายจ่าย</p>{% endif %}
+  <table class="by-item" style="margin-top:.5rem">
+    <tr><td>รายรับวันนี้</td><td class="num">{{ income|baht }}</td></tr>
+    <tr><td>รายจ่ายส่วนกลาง</td><td class="num">{{ exp_common|baht }}</td></tr>
+    <tr><td>รายจ่ายพิเศษ</td><td class="num">{{ exp_special|baht }}</td></tr>
+    <tr><td><b>คงเหลือสุทธิวันนี้</b></td><td class="num"><b class="{{ 'neg' if income - exp_common - exp_special < 0 }}">{{ (income - exp_common - exp_special)|baht }}</b></td></tr>
+  </table>
+</div>
+
 <div class="card receipts-card">
     <h2>ใบเสร็จวันนี้ ({{ rows|length }})</h2>
     <div class="table-wrap"><table>

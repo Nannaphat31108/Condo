@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf %}
+{% block content %}
+<h1>แก้ไขรายจ่าย</h1>
+<div class="card">
+  <form method="post">
+    {{ csrf() }}
+    {% include "admin/_expense_fields.html" %}
+    <button class="btn btn-primary">บันทึก</button>
+    <a class="btn" href="{{ url_for('admin.expenses', month=row.expense_date[:7]) }}">ยกเลิก</a>
+  </form>
+</div>
+{% endblock %}

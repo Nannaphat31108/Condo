@@ -35,6 +35,11 @@
         <textarea name="penalty_types" rows="3">{{ settings.penalty_types }}</textarea>
         <div class="help">แอดมินกรอกจำนวนเงินเบี้ยปรับเองที่เมนู "กรอกเบี้ยปรับ" หรือในหน้าใบแจ้งหนี้แต่ละใบ เช่น เบี้ยปรับ, เบี้ยปรับค่าน้ำ</div></div>
       <p class="help">เลขที่ใบแจ้งหนี้และใบเสร็จรันใหม่ทุกเดือน รูปแบบ ลำดับ/เดือน/ปี เช่น 0001/10/2026</p>
+      <h2 style="margin-top:1.5rem">รายการรายจ่ายที่ใช้บ่อย</h2>
+      <div class="form-row">
+        <div class="field"><label>รายจ่ายส่วนกลาง (บรรทัดละ 1 รายการ)</label><textarea name="expense_items_common" rows="5">{{ settings.expense_items_common }}</textarea></div>
+        <div class="field"><label>รายจ่ายพิเศษ (บรรทัดละ 1 รายการ)</label><textarea name="expense_items_special" rows="5">{{ settings.expense_items_special }}</textarea></div>
+      </div>
       <h2 style="margin-top:1.5rem">การพิมพ์</h2>
       <div class="field"><label>รูปแบบการพิมพ์</label>
         <select name="print_mode">

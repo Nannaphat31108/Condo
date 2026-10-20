@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}สรุปรายรับ-รายจ่าย{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>สรุปรายรับ-รายจ่าย
+    {% if view == 'day' %}รายวัน {{ month|period }}{% elif view == 'month' %}รายเดือน ปี {{ year + 543 }}{% else %}รายปี{% endif %}</h1>
+  <div class="actions no-print">
+    <a class="btn" href="{{ url_for('admin.expense_summary', view=view, month=month, year=year, export='csv') }}">ส่งออก CSV</a>
+    <button class="btn" onclick="window.print()">พิมพ์</button>
+  </div>
+</div>
+<div class="tabs no-print">
+  <a href="{{ url_for('admin.expense_summary', view='day', month=month) }}" class="{{ 'on' if view == 'day' }}">รายวัน</a>
+  <a href="{{ url_for('admin.expense_summary', view='month', year=year) }}" class="{{ 'on' if view == 'month' }}">รายเดือน</a>
+  <a href="{{ url_for('admin.expense_summary', view='year') }}" class="{{ 'on' if view == 'year' }}">รายปี</a>
+</div>
+{% if view != 'year' %}
+<form method="get" class="filters no-print" style="margin-bottom:1rem"><input type="hidden" name="view" value="{{ view }}">
+  {% if view == 'day' %}<div class="field"><label>เดือน</label><input type="month" name="month" value="{{ month }}" onchange="this.form.submit()"></div>
+  {% else %}<div class="field"><label>ปี</label><select name="year" onchange="this.form.submit()">{% for y in years %}<option value="{{ y }}" {{ 'selected' if y|int == year }}>{{ y|int + 543 }}</option>{% endfor %}</select></div>{% endif %}
+</form>
+{% endif %}
+
+<div class="grid grid-4" style="margin-bottom:1.25rem">
+  <div class="stat"><div class="label">รายรับ (ใบเสร็จ)</div><div class="value">{{ totals.income|baht }}</div></div>
+  <div class="stat"><div class="label">รายจ่ายส่วนกลาง</div><div class="value">{{ totals.common|baht }}</div></div>
+  <div class="stat"><div class="label">รายจ่ายพิเศษ</div><div class="value">{{ totals.special|baht }}</div></div>
+  <div class="stat"><div class="label">คงเหลือสุทธิ</div><div class="value {{ 'neg' if totals.net < 0 }}">{{ totals.net|baht }}</div></div>
+</div>
+
+<div class="card"><div class="table-wrap"><table>
+  <thead><tr><th>{{ 'วันที่' if view == 'day' else 'เดือน' if view == 'month' else 'ปี' }}</th><th class="num">รายรับ</th><th class="num">รายจ่ายส่วนกลาง</th><th class="num">รายจ่ายพิเศษ</th><th class="num">รวมรายจ่าย</th><th class="num">คงเหลือสุทธิ</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr><td class="nowrap">
+      {% if view == 'day' %}<a href="{{ url_for('admin.report_daily', date=r.key) }}">{{ r.key|sumlabel }}</a>
+      {% elif view == 'month' %}<a href="{{ url_for('admin.expense_summary', view='day', month=r.key) }}">{{ r.key|sumlabel }}</a>
+      {% else %}<a href="{{ url_for('admin.expense_summary', view='month', year=r.key) }}">{{ r.key|sumlabel }}</a>{% endif %}</td>
+      <td class="num">{{ r.income|baht }}</td><td class="num">{{ r.common|baht if r.common else '—' }}</td><td class="num">{{ r.special|baht if r.special else '—' }}</td>
+      <td class="num">{{ r.expense|baht }}</td><td class="num"><b class="{{ 'neg' if r.net < 0 }}">{{ r.net|baht }}</b></td></tr>
+  {% else %}<tr><td colspan="6" class="muted">ยังไม่มีข้อมูล</td></tr>{% endfor %}
+  </tbody>
+  {% if rows %}<tfoot><tr><td>รวม</td><td class="num">{{ totals.income|baht }}</td><td class="num">{{ totals.common|baht }}</td><td class="num">{{ totals.special|baht }}</td><td class="num">{{ totals.expense|baht }}</td><td class="num">{{ totals.net|baht }}</td></tr></tfoot>{% endif %}
+</table></div></div>
+
+<div class="card">
+  <h2>รายจ่ายแยกตามรายการ</h2>
+  <div class="table-wrap"><table class="by-item">
+    <thead><tr><th>หมวด</th><th>รายการ</th><th class="num">ครั้ง</th><th class="num">จำนวนเงิน</th></tr></thead>
+    <tbody>{% for r in by_item %}<tr><td class="small">{{ categories.get(r.category, r.category) }}</td><td>{{ r.item }}</td><td class="num">{{ r.cnt }}</td><td class="num">{{ r.total|baht }}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">ไม่มีรายจ่าย</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endblock %}

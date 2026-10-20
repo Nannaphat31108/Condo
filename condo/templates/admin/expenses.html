@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, post_button %}
+{% block title %}บันทึกรายจ่าย {{ month|period }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>บันทึกรายจ่าย</h1>
+  <div class="actions"><a class="btn" href="{{ url_for('admin.expense_summary') }}">สรุปรายรับ-รายจ่าย</a></div>
+</div>
+<div class="card">
+  <h2>เพิ่มรายจ่าย</h2>
+  <form method="post">
+    {{ csrf() }}{% if category %}<input type="hidden" name="category_filter" value="{{ category }}">{% endif %}
+    {% set row = none %}{% include "admin/_expense_fields.html" %}
+    <button class="btn btn-primary">บันทึกรายจ่าย</button>
+    <span class="help">เพิ่ม/แก้รายการที่ใช้บ่อยได้ที่ <a href="{{ url_for('admin.settings_page') }}">ตั้งค่าทั่วไป</a></span>
+  </form>
+</div>
+
+<div class="page-head">
+  <h2 style="margin:0">รายจ่ายเดือน {{ month|period }}</h2>
+  <form method="get" class="filters">
+    <div class="field"><label>เดือน</label><input type="month" name="month" value="{{ month }}" onchange="this.form.submit()"></div>
+    <div class="field"><label>หมวด</label><select name="category" onchange="this.form.submit()"><option value="">ทั้งหมด</option>
+      {% for k, v in categories.items() %}<option value="{{ k }}" {{ 'selected' if category == k }}>{{ v }}</option>{% endfor %}</select></div>
+  </form>
+</div>
+<div class="grid grid-3" style="margin-bottom:1rem">
+  <div class="stat"><div class="label">รายจ่ายส่วนกลาง</div><div class="value">{{ totals.common|baht }}</div></div>
+  <div class="stat"><div class="label">รายจ่ายพิเศษ</div><div class="value">{{ totals.special|baht }}</div></div>
+  <div class="stat"><div class="label">รวมรายจ่ายเดือนนี้</div><div class="value">{{ (totals.common + totals.special)|baht }}</div></div>
+</div>
+<div class="card"><div class="table-wrap"><table>
+  <thead><tr><th>วันที่</th><th>หมวด</th><th>รายการ</th><th>รายละเอียด</th><th>จ่ายให้</th><th>วิธีจ่าย</th><th class="num">จำนวนเงิน</th><th class="no-print"></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr><td class="nowrap">{{ r.expense_date|thaidate_short }}</td>
+      <td><span class="badge {{ 'resident' if r.category == 'common' else 'partial' }}">{{ categories[r.category] }}</span></td>
+      <td><b>{{ r.item }}</b></td><td class="small">{{ r.description }}{% if r.reference %} <span class="muted">({{ r.reference }})</span>{% endif %}</td>
+      <td class="small">{{ r.payee }}</td><td class="small">{{ r.method }}</td><td class="num">{{ r.amount|baht }}</td>
+      <td class="nowrap no-print"><a class="btn btn-sm" href="{{ url_for('admin.expense_edit', expense_id=r.id) }}">แก้ไข</a>
+        {{ post_button(url_for('admin.expense_delete', expense_id=r.id), 'ลบ', 'ยืนยันลบรายจ่าย ' ~ r.item ~ ' ?', 'btn btn-sm btn-danger') }}</td></tr>
+  {% else %}<tr><td colspan="8" class="muted">เดือนนี้ยังไม่มีรายจ่าย</td></tr>{% endfor %}
+  </tbody>
+  {% if rows %}<tfoot><tr><td colspan="6">รวม</td><td class="num">{{ rows|sum(attribute='amount')|baht }}</td><td class="no-print"></td></tr></tfoot>{% endif %}
+</table></div></div>
+{% endblock %}

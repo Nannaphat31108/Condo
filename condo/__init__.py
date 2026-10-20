@@ -82,7 +82,7 @@ def create_app(test_config=None):
     app.add_template_filter(billing.thai_date_short, "thaidate_short")
     app.add_template_filter(billing.invoice_period_label, "invperiod")
 
-    from . import auth, views_admin, views_resident
+    from . import auth, views_admin, views_expenses, views_resident  # noqa: F401 (views_expenses เพิ่ม route ใน admin)
     app.register_blueprint(auth.bp)
     app.register_blueprint(views_admin.bp)
     app.register_blueprint(views_resident.bp)

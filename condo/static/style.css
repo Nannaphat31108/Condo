@@ -398,3 +398,6 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
 }
 .report-daily table.by-item { max-width: 460px; }
 @media print { .report-daily .grid-4 { grid-template-columns: repeat(4, 1fr); } }
+.seg { display: flex; gap: 1rem; flex-wrap: wrap; padding-top: .35rem; }
+.neg { color: var(--danger); }
+table.by-item { max-width: 640px; }

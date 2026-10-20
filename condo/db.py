@@ -158,6 +158,22 @@ CREATE TABLE IF NOT EXISTS bill_exclusions (
     PRIMARY KEY (unit_id, period, charge_type_id)
 );
 
+-- รายจ่ายของนิติบุคคล: common = รายจ่ายส่วนกลาง, special = รายจ่ายพิเศษ
+CREATE TABLE IF NOT EXISTS expenses (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    expense_date TEXT NOT NULL,
+    category     TEXT NOT NULL DEFAULT 'common',
+    item         TEXT NOT NULL,
+    description  TEXT DEFAULT '',
+    amount       REAL NOT NULL,
+    payee        TEXT DEFAULT '',
+    method       TEXT DEFAULT '',
+    reference    TEXT DEFAULT '',
+    created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
+
 CREATE TABLE IF NOT EXISTS activity_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER,
@@ -180,6 +196,10 @@ DEFAULT_SETTINGS = {
                       " และประทับตราของนิติบุคคลอาคารชุดเคหะชุมชนคลองจั่น 26",
     "print_mode": "color",           # color = พิมพ์สี, eco = ประหยัดหมึก (ขาวดำ ไม่มีพื้นหลัง)
     "auto_print_receipt": "1",       # รับชำระแล้วพิมพ์ใบเสร็จทันที
+    # รายการรายจ่ายที่ใช้บ่อย (บรรทัดละ 1 รายการ) แก้ได้ที่ตั้งค่าทั่วไป
+    "expense_items_common": "ค่าไฟฟ้าส่วนกลาง\nค่าน้ำประปาส่วนกลาง\nเงินเดือนพนักงาน\nค่ารักษาความปลอดภัย\n"
+                            "ค่าทำความสะอาด\nค่าเก็บขยะ\nค่าวัสดุสิ้นเปลือง\nค่าโทรศัพท์ / อินเทอร์เน็ต\nค่าเบี้ยประกันอาคาร",
+    "expense_items_special": "ค่าซ่อมแซม\nค่าปรับปรุงอาคาร\nค่าจ้างเหมา\nค่าอุปกรณ์\nค่าใช้จ่ายประชุม\nอื่น ๆ",
     "logo": "",                      # รูปโลโก้ที่อัปโหลด (data URL) ว่าง = ใช้ static/logo.png
     "issue_day": "1",          # วันที่ออกใบแจ้งหนี้
     "due_days": "15",          # ครบกำหนดชำระภายในกี่วันหลังออกบิล

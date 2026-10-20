@@ -1546,6 +1546,7 @@ def report_daily():
         by_method[m] = (cnt + 1, billing.money(amt + r["p"]["amount"]))
     issued = db.execute("SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS total FROM invoices"
                         " WHERE issue_date=? AND status!='void'", (day,)).fetchone()
+    day_expenses = db.execute("SELECT * FROM expenses WHERE expense_date=? ORDER BY category, id", (day,)).fetchall()
     # ตารางรายวันทั้งเดือน
     y, mo = (int(x) for x in month.split("-"))
     last_day = calendar.monthrange(y, mo)[1]
@@ -1565,6 +1566,7 @@ def report_daily():
             [[d, v["count"], *[v["parts"].get(c, 0) for c in cols], v["total"]] for d, v in sorted(days.items())],
         )
     return render_template("admin/report_daily.html", day=day, month=month, rows=rows, by_item=by_item,
+                           day_expenses=day_expenses,
                            item_cols=item_columns(rows), by_method=by_method, issued=issued, cols=cols,
                            days=sorted(days.items()), month_totals=month_totals,
                            month_total=billing.money(sum(d["total"] for d in days.values())),
