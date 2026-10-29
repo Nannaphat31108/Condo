@@ -339,16 +339,20 @@ def multi_bill_lines(db, unit, months):
     lines = []
     for ct in cts:
         sel = selections.get(ct["id"], {})
-        applies = [m for m in months if billing.charge_applies(ct, m, unit, sel) and (m, ct["id"]) not in excluded]
+        # ค่าที่กรอกเองรายห้อง (เช่น ค่าเช่าพื้นที่ร้านค้า): ติ๊กได้เสมอ แม้ยังไม่เคยกรอกยอดไว้
+        rule = {**dict(ct), "manual_amount": 0} if ct["manual_amount"] else ct
+        applies = [m for m in months if billing.charge_applies(rule, m, unit, sel) and (m, ct["id"]) not in excluded]
         due = [m for m in applies if ct["id"] not in billed[m]]
         line = {"ct": ct, "months": due, "skipped": [m for m in applies if m not in due],
-                "meter": ct["method"] in billing.METER_METHODS}
+                "meter": ct["method"] in billing.METER_METHODS, "manual": bool(ct["manual_amount"])}
         if line["meter"]:
             last = db.execute("SELECT curr_reading FROM meter_readings WHERE charge_type_id=? AND unit_id=?"
                               " AND period<? ORDER BY period DESC LIMIT 1",
                               (ct["id"], unit["id"], months[0] if months else "9999")).fetchone()
             line["prev"] = last[0] if last else None
             line["monthly"] = float(ct["min_charge"] or 0) + float(ct["fixed_fee"] or 0)  # เหมาจ่ายต่อเดือน
+        elif line["manual"]:
+            line["monthly"] = sel.get(unit["id"]) or 0
         else:
             line["monthly"] = billing.compute_item(ct, unit, None, sel.get(unit["id"]))["amount"]
         lines.append(line)
@@ -432,6 +436,10 @@ def unit_multi_bill(unit_id):
             monthly = billing.money(to_float(f.get(f"monthly_{ct['id']}"), line["monthly"]))
             if monthly <= 0:
                 continue
+            if line["manual"] and not line["monthly"]:
+                # ยังไม่เคยกรอกค่าเช่าของร้านนี้: จำยอดนี้ไว้ใช้ในเดือนถัด ๆ ไป
+                db.execute("INSERT OR REPLACE INTO charge_type_units (charge_type_id, unit_id, amount_override)"
+                           " VALUES (?,?,?)", (ct["id"], unit_id, monthly))
             amount = billing.money(monthly * n)
             items.append({**base, "detail": f"{n} เดือน × {monthly:,.2f}" + (" (เหมาจ่าย)" if line["meter"] else ""),
                           "quantity": n, "unit_label": "เดือน", "unit_price": monthly, "amount": amount,

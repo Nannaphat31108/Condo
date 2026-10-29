@@ -43,7 +43,7 @@
       {% for l in lines %}{% set ct = l.ct %}
         <tr data-line {% if l.meter %}data-meter data-rate="{{ ct.rate }}" data-min="{{ ct.min_charge }}" data-fee="{{ ct.fixed_fee }}"{% endif %}>
           <td><input type="checkbox" name="inc_{{ ct.id }}" value="1" {{ 'checked' if l.months and (l.monthly or l.meter) }} {{ 'disabled' if not l.months }}></td>
-          <td><b>{{ ct.name }}</b>
+          <td><b>{{ ct.name }}</b>{% if l.manual %} <span class="muted small">กรอกยอดต่อเดือน{{ '' if l.monthly else ' (ยังไม่เคยกรอก — ใส่ยอดแล้วติ๊ก)' }}</span>{% endif %}
             {% if l.meter and l.months %}
             <div class="meter-inputs">
               <label>เลขมาตรครั้งก่อน <input class="cell" type="number" step="0.01" name="prev_{{ ct.id }}" value="{{ (l.prev|num|replace(',', '')) if l.prev is not none else '' }}"></label>

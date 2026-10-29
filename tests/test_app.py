@@ -988,3 +988,28 @@ def test_expenses_and_income_expense_summary(app, client):
     s.post(f"/admin/expenses/{eid}/delete", {})
     with app.app_context():
         assert get_db().execute("SELECT COUNT(*) FROM expenses").fetchone()[0] == 2
+
+
+def test_shop_rent_tickable_in_multi_bill_and_sheet(app, client):
+    from condo import billing as b
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/new", {"unit_no": "ร้าน 2", "unit_type": "shop", "tenant_name": "ร้านข้าว", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        uid = db.execute("SELECT id FROM units").fetchone()[0]
+        rent = db.execute("SELECT id FROM charge_types WHERE name='ค่าเช่าพื้นที่'").fetchone()[0]
+    cur = b.current_period()
+    # ยังไม่เคยกรอกค่าเช่า -> ในหน้าค้างย้อนหลัง/จ่ายล่วงหน้า ต้องติ๊กได้
+    page = client.get(f"/admin/units/{uid}/multi-bill?ahead=3").get_data(as_text=True)
+    row = page[page.index(f'name="inc_{rent}"') - 10: page.index(f'name="inc_{rent}"') + 120]
+    assert "disabled" not in row
+    p_from, p_to = cur, b.add_months(cur, 2)
+    s.post(f"/admin/units/{uid}/multi-bill", {"from": p_from, "to": p_to, f"inc_{rent}": "1", f"monthly_{rent}": "4000"})
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT total FROM invoices").fetchone()[0] == 12000
+        assert db.execute("SELECT amount_override FROM charge_type_units WHERE unit_id=?", (uid,)).fetchone()[0] == 4000
+    # หน้ามิเตอร์ไฟ/ค่าเช่า/มิเตอร์น้ำ: ช่องค่าเช่าแสดงยอดที่จำไว้ (เดือนถัดจากที่จ่ายล่วงหน้า)
+    form = sheet_form(client, f"/admin/sheet?type=shop&period={b.add_months(cur, 3)}")
+    assert form[f"amt_{rent}_{uid}"] == "4000.00" and form[f"inc_{rent}_{uid}"] == "1"
