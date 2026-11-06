@@ -23,6 +23,7 @@
   {{ csrf() }}<input type="hidden" name="period" value="{{ period }}"><input type="hidden" name="type" value="{{ unit_type }}">
   <div class="sheet-bar">
     <div class="field"><label>วันที่จดมิเตอร์</label><input type="date" name="read_date" value="{{ read_date }}"></div>
+    <div class="field"><label>หมายเหตุค่าน้ำ/ค่าไฟในบิล: ใช้เดือน</label><input type="month" name="usage_month" value="{{ usage_month }}" title="เดือนที่ใช้น้ำจริง จะพิมพ์ใต้รายการค่าน้ำ เช่น ใช้น้ำเดือน ตุลาคม 2569 (เว้นว่าง = ไม่แสดง)"></div>
     <div class="field"><label>ค้นหา</label><input type="text" id="find" placeholder="เลขห้อง / ชื่อ"></div>
     <div class="sheet-sum">ยอดรวมทั้งหมด <b id="grand">0.00</b> บาท</div>
     <div class="actions">

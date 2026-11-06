@@ -51,11 +51,24 @@
 
   {% if admin and inv.status != 'void' %}
   <h3 style="margin-top:1.25rem">แก้ไขรายการในบิลนี้</h3>
+  <script>
+  document.addEventListener("change", function (e) {
+    var m = e.target;
+    if (!m.matches(".item-note-form input[type=month]") || !m.value) return;
+    var months = {{ THAI_MONTHS|tojson }}, ym = m.value.split("-");
+    m.form.note.value = m.dataset.word + "เดือน " + months[+ym[1]] + " " + (+ym[0] + 543);
+  });
+  </script>
   <p class="help">แก้ได้แม้ชำระแล้ว — เพิ่มรายการแล้วบิลจะกลับเป็น "ชำระบางส่วน" ให้รับชำระส่วนที่เพิ่ม · ลบรายการได้ถ้ายอดไม่ต่ำกว่าที่ชำระแล้ว</p>
   {% set extra = items %}
   {% if extra %}
   <table style="margin-bottom:.75rem">
     {% for it in extra %}<tr><td>{{ it.description }} {% if it.kind == 'penalty' %}<span class="badge partial">เบี้ยปรับ</span>{% endif %}</td><td class="num">{{ it.amount|baht }}</td>
+      <td><form method="post" action="{{ url_for('admin.invoice_item_note', item_id=it.id) }}" class="item-note-form">
+        {{ csrf() }}<input type="month" name="month" title="เลือกเดือนที่ใช้ แล้วระบบเขียนหมายเหตุให้"
+          data-word="{{ 'ใช้น้ำ' if 'น้ำ' in it.description else 'ใช้ไฟ' if 'ไฟ' in it.description else 'ค่าใช้' }}">
+        <input type="text" name="note" value="{{ it.note or '' }}" placeholder="{{ 'หมายเหตุ เช่น ใช้น้ำเดือน ตุลาคม 2569' if it.meter_curr is not none else 'หมายเหตุ (ถ้ามี)' }}" maxlength="200">
+        <button class="btn btn-sm">บันทึกหมายเหตุ</button></form></td>
       <td class="num">{{ post_button(url_for('admin.invoice_item_delete', item_id=it.id), 'ลบ', 'ยืนยันลบ ' ~ it.description ~ ' ?', 'btn btn-sm btn-danger') }}</td></tr>{% endfor %}
   </table>
   {% endif %}

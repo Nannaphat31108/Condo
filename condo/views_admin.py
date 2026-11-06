@@ -40,6 +40,14 @@ def get_period_arg(name="period"):
     return period if valid_period(period) else billing.current_period()
 
 
+def usage_period_arg(period):
+    """เดือนที่ใช้น้ำ/ไฟ ที่แอดมินเลือกตอนออกบิล (เว้นว่าง = ไม่แสดงหมายเหตุ)"""
+    value = request.values.get("usage_month")
+    if value is None:
+        return billing.default_usage_period(period, get_settings())
+    return value if valid_period(value) else None
+
+
 def get_or_404(sql, params):
     row = get_db().execute(sql, params).fetchone()
     if row is None:
@@ -1073,7 +1081,8 @@ def sheet():
         for e in errors[:20]:
             flash(e, "error")
         if f.get("action") == "bill":
-            result = billing.generate_invoices(db, period, get_settings(), unit_ids=[u["id"] for u in units_])
+            result = billing.generate_invoices(db, period, get_settings(), unit_ids=[u["id"] for u in units_],
+                                               usage_period=usage_period_arg(period))
             log_activity(g.user, f"ออกใบแจ้งหนี้งวด {period} จำนวน {len(result['created'])} ฉบับ (จากหน้ากรอกรวม)")
             db.commit()
             flash(f"บันทึกแล้ว และออกใบแจ้งหนี้ใหม่ {len(result['created'])} ฉบับ"
@@ -1148,7 +1157,8 @@ def sheet():
     read_date = next((r["read_date"] for m in readings.values() for r in m["current"].values() if r["read_date"]),
                      date.today().isoformat())
     return render_template("admin/sheet.html", period=period, unit_type=unit_type, cols=cols, rows=rows,
-                           penalty_types=penalty_types, counts=counts, read_date=read_date)
+                           penalty_types=penalty_types, counts=counts, read_date=read_date,
+                           usage_month=billing.default_usage_period(period, get_settings()) or "")
 
 
 
@@ -1159,7 +1169,7 @@ def billing_page():
     db = get_db()
     period = get_period_arg()
     if request.method == "POST":
-        result = billing.generate_invoices(db, period, get_settings())
+        result = billing.generate_invoices(db, period, get_settings(), usage_period=usage_period_arg(period))
         log_activity(g.user, f"ออกใบแจ้งหนี้งวด {period} จำนวน {len(result['created'])} ฉบับ")
         db.commit()
         flash(f"ออกใบแจ้งหนี้ใหม่ {len(result['created'])} ฉบับ", "success")
@@ -1183,7 +1193,8 @@ def billing_page():
                                (period,)).fetchone()[0]
     issue_date, due_date = billing.billing_dates(period, get_settings())
     return render_template("admin/billing.html", period=period, meter_status=meter_status, unit_count=unit_count,
-                           invoices=invoices, pending_adhoc=pending_adhoc, issue_date=issue_date, due_date=due_date)
+                           invoices=invoices, pending_adhoc=pending_adhoc, issue_date=issue_date, due_date=due_date,
+                           usage_month=billing.default_usage_period(period, get_settings()) or "")
 
 
 @bp.route("/invoices")
@@ -1370,6 +1381,24 @@ def invoice_add_item(invoice_id):
         db.commit()
         flash(f"เพิ่ม {description} แล้ว ยอดบิลถูกคำนวณใหม่", "success")
     return redirect(url_for("admin.invoice_detail", invoice_id=invoice_id))
+
+
+@bp.route("/invoice-items/<int:item_id>/note", methods=("POST",))
+@admin_required
+def invoice_item_note(item_id):
+    """แก้หมายเหตุใต้รายการ (เช่น เดือนที่ใช้น้ำ) แก้ได้แม้บิลชำระแล้ว ยอดเงินไม่เปลี่ยน"""
+    db = get_db()
+    item = get_or_404("SELECT * FROM invoice_items WHERE id=?", (item_id,))
+    inv = db.execute("SELECT * FROM invoices WHERE id=?", (item["invoice_id"],)).fetchone()
+    note = request.form.get("note", "").strip()[:200]
+    month = request.form.get("month", "")
+    if not note and valid_period(month):
+        note = billing.usage_note({"name": item["description"]}, month)
+    db.execute("UPDATE invoice_items SET note=? WHERE id=?", (note, item_id))
+    log_activity(g.user, f"แก้หมายเหตุ '{item['description']}' ในบิล {inv['invoice_no']}: {note or '(ว่าง)'}")
+    db.commit()
+    flash(f"บันทึกหมายเหตุ {item['description']} แล้ว", "success")
+    return redirect(url_for("admin.invoice_detail", invoice_id=item["invoice_id"]))
 
 
 @bp.route("/invoice-items/<int:item_id>/delete", methods=("POST",))
@@ -1696,6 +1725,8 @@ def settings_page():
                 value = str(max(int(to_float(value, 1)), 0))
             if key == "print_mode" and value not in ("color", "eco"):
                 value = "color"
+            if key == "meter_note" and value not in ("prev", "same", "none"):
+                value = "prev"
             if key == "auto_print_receipt":
                 value = "1" if value else "0"
             if key == "penalty_types":

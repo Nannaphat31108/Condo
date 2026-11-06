@@ -24,6 +24,8 @@
       — ห้องที่ยังไม่ได้จดมิเตอร์จะยังไม่ออกบิล กดซ้ำได้หลังจดเพิ่ม</p>
     <form method="post" data-confirm="ยืนยันออกใบแจ้งหนี้งวด {{ period|period }} ?">
       {{ csrf() }}<input type="hidden" name="period" value="{{ period }}">
+      <div class="field"><label>หมายเหตุค่าน้ำ/ค่าไฟในบิล: ใช้เดือน</label><input type="month" name="usage_month" value="{{ usage_month }}" title="เดือนที่ใช้น้ำจริง จะพิมพ์ใต้รายการค่าน้ำ เช่น ใช้น้ำเดือน ตุลาคม 2569 (เว้นว่าง = ไม่แสดง)"></div>
+      <p class="help">ค่ามิเตอร์ที่จดในงวด {{ period|period }} คือค่าใช้ของเดือนที่เลือกนี้ ระบบจะพิมพ์ "หมายเหตุ: ใช้น้ำเดือน …" ใต้รายการค่าน้ำในบิล (แก้ทีละบิลได้ที่หน้าใบแจ้งหนี้)</p>
       <button class="btn btn-primary">ออกใบแจ้งหนี้งวด {{ period|period }}</button>
     </form>
     {% if invoices %}<p class="actions" style="margin-top:.75rem">

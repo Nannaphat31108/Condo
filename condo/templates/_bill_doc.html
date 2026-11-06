@@ -61,6 +61,7 @@
         <td class="c">{{ loop.index }}</td>
         <td>
           <div class="item-name">{{ it.description }}</div>
+          {% if it.note %}<div class="item-note">หมายเหตุ: {{ it.note }}</div>{% endif %}
           {% if it.meter_curr is not none %}
           <div class="item-meter">
             <span>จดครั้งก่อน{% if it.meter_prev_date %} {{ it.meter_prev_date|thaidate_short }}{% endif %} · เลขมาตร <b>{{ it.meter_prev|num }}</b></span>

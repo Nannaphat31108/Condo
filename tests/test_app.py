@@ -1013,3 +1013,43 @@ def test_shop_rent_tickable_in_multi_bill_and_sheet(app, client):
     # หน้ามิเตอร์ไฟ/ค่าเช่า/มิเตอร์น้ำ: ช่องค่าเช่าแสดงยอดที่จำไว้ (เดือนถัดจากที่จ่ายล่วงหน้า)
     form = sheet_form(client, f"/admin/sheet?type=shop&period={b.add_months(cur, 3)}")
     assert form[f"amt_{rent}_{uid}"] == "4000.00" and form[f"inc_{rent}_{uid}"] == "1"
+
+
+def test_water_usage_month_note(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/import", {"csv_text": "26/1,A,1,30,สมชาย,081\n"})
+    with app.app_context():
+        db = get_db()
+        uid = db.execute("SELECT id FROM units").fetchone()[0]
+        water = db.execute("SELECT id FROM charge_types WHERE unit_type='room' AND name LIKE 'ค่าน้ำ%'").fetchone()[0]
+    # ค่าเริ่มต้น: บิลงวดพฤศจิกายน ค่าน้ำเป็นของเดือนตุลาคม
+    form = sheet_form(client, "/admin/sheet?period=2026-11&type=room")
+    assert form["usage_month"] == "2026-10"
+    form.update({f"curr_{water}_{uid}": "10", "action": "bill"})
+    form.pop("_csrf", None)
+    s.post("/admin/sheet", form)
+    with app.app_context():
+        db = get_db()
+        item = db.execute("SELECT * FROM invoice_items WHERE charge_type_id=?", (water,)).fetchone()
+        assert item["note"] == "ใช้น้ำเดือน ตุลาคม 2569"
+        inv_id = item["invoice_id"]
+    assert "หมายเหตุ: ใช้น้ำเดือน ตุลาคม 2569" in client.get(f"/admin/invoices/{inv_id}").get_data(as_text=True)
+    # แอดมินแก้เดือนเองทีละบิล (เลือกเดือน หรือพิมพ์ข้อความเอง)
+    s.post(f"/admin/invoice-items/{item['id']}/note", {"month": "2026-09", "note": ""})
+    with app.app_context():
+        assert get_db().execute("SELECT note FROM invoice_items WHERE id=?", (item["id"],)).fetchone()[0] \
+            == "ใช้น้ำเดือน กันยายน 2569"
+    s.post(f"/admin/invoice-items/{item['id']}/note", {"note": "ค่าน้ำ ก.ย.-ต.ค. 69"})
+    with app.app_context():
+        assert get_db().execute("SELECT note FROM invoice_items WHERE id=?", (item["id"],)).fetchone()[0] \
+            == "ค่าน้ำ ก.ย.-ต.ค. 69"
+    # เว้นว่างตอนออกบิล = ไม่แสดงหมายเหตุ
+    with app.app_context():
+        from condo import billing as b
+        db = get_db()
+        db.execute("INSERT INTO meter_readings (charge_type_id, unit_id, period, prev_reading, curr_reading)"
+                   " VALUES (?,?,?,?,?)", (water, uid, "2026-12", 10, 20))
+        b.generate_invoices(db, "2026-12", {}, usage_period=None)
+        assert db.execute("SELECT ii.note FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id"
+                          " WHERE i.period='2026-12' AND charge_type_id=?", (water,)).fetchone()[0] in ("", None)

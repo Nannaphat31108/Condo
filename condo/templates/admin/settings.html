@@ -16,6 +16,13 @@
       </div>
       <div class="field"><label>ช่องทางชำระเงิน</label><textarea name="bank_info" rows="2">{{ settings.bank_info }}</textarea></div>
       <div class="field"><label>หมายเหตุท้ายใบแจ้งหนี้</label><textarea name="invoice_note" rows="2">{{ settings.invoice_note }}</textarea></div>
+      <div class="field"><label>หมายเหตุเดือนที่ใช้น้ำ/ไฟ ใต้ค่ามิเตอร์ในบิล</label>
+        <select name="meter_note">
+          <option value="prev" {{ 'selected' if settings.meter_note not in ('same', 'none') }}>เดือนก่อนงวดบิล (เช่น บิลพฤศจิกายน → ใช้น้ำเดือนตุลาคม)</option>
+          <option value="same" {{ 'selected' if settings.meter_note == 'same' }}>เดือนเดียวกับงวดบิล</option>
+          <option value="none" {{ 'selected' if settings.meter_note == 'none' }}>ไม่แสดง</option>
+        </select>
+        <div class="help">เป็นค่าเริ่มต้น ตอนออกบิลเลือกเดือนเองได้ และแก้ทีละบิลได้ที่หน้าใบแจ้งหนี้</div></div>
       <div class="field"><label>ตำแหน่งผู้ลงนาม (ใต้ช่องเซ็นชื่อ)</label><input type="text" name="manager_title" value="{{ settings.manager_title }}"></div>
       <div class="field"><label>ข้อความท้ายใบเสร็จ</label><textarea name="receipt_footer" rows="2">{{ settings.receipt_footer }}</textarea></div>
       <div class="field"><label>โลโก้</label>

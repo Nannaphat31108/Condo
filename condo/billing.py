@@ -224,7 +224,26 @@ def next_number(db, table, column, period):
     return f"{seq:04d}{suffix}"
 
 
-def charge_item(db, ct, unit, period, selections):
+def usage_note(ct, usage_period):
+    """หมายเหตุใต้รายการค่ามิเตอร์ บอกเดือนที่ใช้จริง เช่น ใช้น้ำเดือน ตุลาคม 2569"""
+    if not usage_period:
+        return ""
+    name = ct["name"]
+    word = "ใช้น้ำ" if "น้ำ" in name else "ใช้ไฟ" if "ไฟ" in name else "ค่าใช้"
+    return f"{word}เดือน {period_label(usage_period)}"
+
+
+def default_usage_period(period, settings):
+    """เดือนที่ใช้น้ำ/ไฟ ของบิลงวดนี้ตามที่ตั้งค่าไว้ (ค่าเริ่มต้น: เดือนก่อนหน้างวดบิล) None = ไม่แสดง"""
+    mode = (settings or {}).get("meter_note", "prev")
+    if mode == "same":
+        return period
+    if mode == "none":
+        return None
+    return add_months(period, -1)
+
+
+def charge_item(db, ct, unit, period, selections, usage_period=None):
     """รายการของค่าบริการ 1 ตัวสำหรับห้องนี้ คืน item หรือ None ถ้าเป็นค่ามิเตอร์ที่ยังไม่ได้จด"""
     sel = selections.get(ct["id"], {})
     reading = None
@@ -243,6 +262,7 @@ def charge_item(db, ct, unit, period, selections):
         ).fetchone()
         item["meter_curr_date"] = reading["read_date"] or reading["recorded_at"][:10]
         item["meter_prev_date"] = (prev["read_date"] or prev["recorded_at"][:10]) if prev else None
+        item["note"] = usage_note(ct, usage_period)
     return item
 
 
@@ -270,7 +290,7 @@ def invoices_covering(db, unit_id, period):
         " ORDER BY id", (unit_id, period, period)).fetchall()
 
 
-def build_unit_items(db, unit, period, charge_types, selections):
+def build_unit_items(db, unit, period, charge_types, selections, usage_period=None):
     """รายการที่ยังไม่ได้ออกบิลของห้องในงวดนั้น คืน (items, missing_meters, adhoc_ids)
 
     ค่าบริการที่ออกบิลไปแล้วในงวดนี้ (เช่น จ่ายค่าขยะไปก่อน หรือจ่ายล่วงหน้า) จะไม่ถูกเรียกเก็บซ้ำ
@@ -281,7 +301,7 @@ def build_unit_items(db, unit, period, charge_types, selections):
     for ct in charge_types:
         if ct["id"] in excluded or ct["id"] in billed or not charge_applies(ct, period, unit, selections.get(ct["id"], {})):
             continue
-        item = charge_item(db, ct, unit, period, selections)
+        item = charge_item(db, ct, unit, period, selections, usage_period)
         if item is None:
             missing.append(ct["name"])
             continue
@@ -312,7 +332,7 @@ def load_selections(db):
 
 ITEM_COLUMNS = ("charge_type_id", "description", "detail", "quantity", "unit_label", "unit_price", "amount",
                 "vat_amount", "sort_order", "kind", "meter_prev", "meter_curr", "meter_prev_date", "meter_curr_date",
-                "period_from", "period_to")
+                "period_from", "period_to", "note")
 
 
 def insert_item(db, invoice_id, item):
@@ -340,12 +360,15 @@ def create_invoice(db, unit, period, items, settings, issue_date, due_date, peri
     return invoice_id, invoice_no
 
 
-def generate_invoices(db, period, settings, unit_ids=None):
+def generate_invoices(db, period, settings, unit_ids=None, usage_period=False):
     """ออกใบแจ้งหนี้ให้ทุกห้อง เฉพาะรายการที่ยังไม่ได้ออกบิลในงวดนี้
 
     ห้องที่ออกบิลครบแล้วจะไม่ได้บิลซ้ำ ห้องที่มีรายการเพิ่ม (เช่น มาจ่ายค่าน้ำทีหลัง) จะได้บิลใบใหม่
     ห้องที่ยังไม่ได้จดมิเตอร์จะถูกข้ามไว้ก่อน เพื่อไม่ให้บิลผิด
+    usage_period = เดือนที่ใช้น้ำ/ไฟ ที่พิมพ์เป็นหมายเหตุใต้ค่ามิเตอร์ (ไม่ส่ง = ตามตั้งค่า, None = ไม่แสดง)
     """
+    if usage_period is False:
+        usage_period = default_usage_period(period, settings)
     charge_types = db.execute("SELECT * FROM charge_types ORDER BY sort_order, id").fetchall()
     selections = load_selections(db)
     issue_date, due_date = billing_dates(period, settings)
@@ -358,7 +381,7 @@ def generate_invoices(db, period, settings, unit_ids=None):
 
     result = {"created": [], "skipped_existing": [], "missing_meter": [], "empty": []}
     for unit in units:
-        items, missing, adhoc_ids = build_unit_items(db, unit, period, charge_types, selections)
+        items, missing, adhoc_ids = build_unit_items(db, unit, period, charge_types, selections, usage_period)
         if missing:
             result["missing_meter"].append(f"{unit['unit_no']} ({', '.join(missing)})")
             continue

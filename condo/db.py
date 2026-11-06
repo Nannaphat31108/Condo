@@ -196,6 +196,7 @@ DEFAULT_SETTINGS = {
                       " และประทับตราของนิติบุคคลอาคารชุดเคหะชุมชนคลองจั่น 26",
     "print_mode": "color",           # color = พิมพ์สี, eco = ประหยัดหมึก (ขาวดำ ไม่มีพื้นหลัง)
     "auto_print_receipt": "1",       # รับชำระแล้วพิมพ์ใบเสร็จทันที
+    "meter_note": "prev",            # หมายเหตุเดือนที่ใช้น้ำ/ไฟ ใต้ค่ามิเตอร์: prev = เดือนก่อนงวดบิล, same, none
     # รายการรายจ่ายที่ใช้บ่อย (บรรทัดละ 1 รายการ) แก้ได้ที่ตั้งค่าทั่วไป
     "expense_items_common": "ค่าไฟฟ้าส่วนกลาง\nค่าน้ำประปาส่วนกลาง\nเงินเดือนพนักงาน\nค่ารักษาความปลอดภัย\n"
                             "ค่าทำความสะอาด\nค่าเก็บขยะ\nค่าวัสดุสิ้นเปลือง\nค่าโทรศัพท์ / อินเทอร์เน็ต\nค่าเบี้ยประกันอาคาร",
@@ -270,6 +271,8 @@ def migrate(db):
     # บิลหลายเดือน (ค้างย้อนหลัง / จ่ายล่วงหน้า): ช่วงงวดที่บิล/รายการครอบคลุม
     add_columns(db, "invoices", [("period_to", "TEXT")])
     add_columns(db, "invoice_items", [("period_from", "TEXT"), ("period_to", "TEXT")])
+    # หมายเหตุใต้รายการ เช่น ค่าน้ำ "ใช้น้ำเดือน ตุลาคม 2569" (แอดมินแก้เองได้)
+    add_columns(db, "invoice_items", [("note", "TEXT DEFAULT ''")])
     add_columns(db, "adhoc_charges", [("kind", "TEXT NOT NULL DEFAULT 'manual'")])
     if "unit_type" in add_columns(db, "charge_types", [("unit_type", "TEXT NOT NULL DEFAULT 'all'"),
                                                        ("manual_amount", "INTEGER NOT NULL DEFAULT 0")]):
