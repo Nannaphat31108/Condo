@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, status_badge, post_button %}
+{% block title %}ประนอมหนี้ {{ plan.unit_no }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>ประนอมหนี้ — {{ plan.unit_no }} <span class="badge {{ 'paid' if plan.status == 'done' else 'off' if plan.status == 'cancelled' else 'partial' }}">{{ statuses[plan.status] }}</span></h1>
+  <div class="actions">
+    <a class="btn" href="{{ url_for('admin.debt_print', plan_id=plan.id) }}" target="_blank">พิมพ์ข้อตกลง / ตารางผ่อน</a>
+    <a class="btn" href="{{ url_for('admin.debts') }}">กลับ</a>
+  </div>
+</div>
+<div class="grid grid-3" style="margin-bottom:1rem">
+  <div class="stat"><div class="label">ยอดหนี้ที่ตกลงผ่อน</div><div class="value">{{ plan.total|baht }}</div></div>
+  <div class="stat"><div class="label">ผ่อนแล้ว</div><div class="value">{{ paid|baht }}</div></div>
+  <div class="stat"><div class="label">คงเหลือ</div><div class="value">{{ remaining|baht }}</div></div>
+</div>
+<div class="card">
+  <p>ผู้ทำสัญญา <b>{{ plan.debtor_name or '—' }}</b>{% if plan.debtor_phone %} · โทร. {{ plan.debtor_phone }}{% endif %}
+    · ทำสัญญาวันที่ {{ plan.agreement_date|thaidate }} · ผ่อน {{ plan.installments }} งวด งวดละ {{ plan.monthly|baht }} บาท
+    {% if overdue %}<span class="badge unpaid">เกินกำหนด {{ overdue }} งวด</span>{% endif %}</p>
+  {% if plan.note %}<p class="small">หมายเหตุ: {{ plan.note }}</p>{% endif %}
+
+  {% if plan.status == 'active' and remaining > 0 %}
+  <h2>รับเงินผ่อน</h2>
+  <form method="post" action="{{ url_for('admin.debt_pay', plan_id=plan.id) }}">
+    {{ csrf() }}
+    <div class="form-row">
+      <div class="field"><label>จำนวนเงิน (บาท){% if next %} — งวดที่ {{ next.no }}{% endif %}</label>
+        <input type="number" step="0.01" name="amount" required value="{{ '%.2f'|format(next.cum - paid if next else remaining) }}"></div>
+      <div class="field"><label>วันที่ชำระ</label><input type="date" name="paid_at" value="{{ today }}"></div>
+      <div class="field"><label>ช่องทาง</label><select name="method">{% for m in methods %}<option {{ 'selected' if m == 'เงินสด' }}>{{ m }}</option>{% endfor %}</select></div>
+      <div class="field"><label>เลขอ้างอิง</label><input type="text" name="reference"></div>
+    </div>
+    <button class="btn btn-primary">บันทึกรับเงินผ่อน</button>
+    <label class="check inline" style="display:inline-flex;margin-left:1rem"><input type="checkbox" name="print_receipt" value="1" {{ 'checked' if settings.auto_print_receipt != '0' }}> พิมพ์ใบเสร็จทันที</label>
+    <div class="help">เงินจะตัดชำระบิลที่เก่าที่สุดก่อน ถ้าครอบคลุมหลายบิลจะได้ใบเสร็จตามจำนวนบิล</div>
+  </form>
+  {% endif %}
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>ตารางผ่อน</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>งวด</th><th>เดือน</th><th class="num">ยอดงวดนี้</th><th class="num">ยอดสะสม</th><th>สถานะ</th></tr></thead>
+      <tbody>{% for s in schedule %}
+        <tr><td>{{ s.no }}</td><td>{{ s.period|period }}</td><td class="num">{{ s.amount|baht }}</td><td class="num">{{ s.cum|baht }}</td>
+          <td>{% if s.state == 'paid' %}<span class="badge paid">ชำระแล้ว</span>{% elif s.state == 'partial' %}<span class="badge partial">ชำระบางส่วน</span>
+            {% elif s.state == 'overdue' %}<span class="badge unpaid">เกินกำหนด</span>{% elif s.state == 'due' %}<span class="badge partial">ถึงกำหนดเดือนนี้</span>
+            {% else %}<span class="badge off">ยังไม่ถึง</span>{% endif %}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <h2>บิลในแผนนี้</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>เลขที่</th><th>งวด</th><th>สถานะ</th><th class="num">ค้าง</th></tr></thead>
+      <tbody>{% for i in invoices %}
+        <tr><td><a href="{{ url_for('admin.invoice_detail', invoice_id=i.id) }}">{{ i.invoice_no }}</a></td><td class="small">{{ i|invperiod }}</td>
+          <td>{{ status_badge(i.status) }}</td><td class="num">{{ (i.total - i.paid_amount)|baht }}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+    <h2 style="margin-top:1rem">ประวัติรับเงินผ่อน</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>วันที่</th><th>ใบเสร็จ</th><th>บิล</th><th class="num">จำนวน</th></tr></thead>
+      <tbody>{% for p in payments %}
+        <tr><td class="small">{{ p.paid_at|thaidate_short }}</td><td><a href="{{ url_for('admin.receipts_print', ids=p.id) }}" target="_blank">{{ p.receipt_no }}</a></td>
+          <td class="small">{{ p.invoice_no }}</td><td class="num">{{ p.amount|baht }}</td></tr>
+      {% else %}<tr><td colspan="4" class="muted">ยังไม่มี</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>เปลี่ยนสถานะแผน</h3>
+  <p class="help">ยกเลิกแผน = เลิกผ่อนตามข้อตกลง บิลค้างยังอยู่ตามเดิม (ใบเสร็จที่รับไปแล้วไม่เปลี่ยน)</p>
+  {% for k, v in statuses.items() if k != plan.status %}
+    {{ post_button(url_for('admin.debt_status', plan_id=plan.id) ~ '?status=' ~ k, v, 'ยืนยันเปลี่ยนสถานะเป็น ' ~ v ~ ' ?', 'btn btn-sm' ~ (' btn-danger' if k == 'cancelled' else '')) }}
+  {% endfor %}
+</div>
+{% endblock %}

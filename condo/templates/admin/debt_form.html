@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% from "_macros.html" import csrf, status_badge %}
+{% block title %}ทำแผนประนอมหนี้ {{ unit.unit_no }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>ทำแผนประนอมหนี้ — {{ unit.unit_no }}</h1>
+  <a class="btn" href="{{ url_for('admin.debts') }}">กลับ</a>
+</div>
+<form method="post" class="card" id="debt-form">
+  {{ csrf() }}<input type="hidden" name="unit_id" value="{{ unit.id }}">
+  <h2>1. หนี้ที่นำมาผ่อน</h2>
+  {% if invs %}
+  <div class="table-wrap"><table>
+    <thead><tr><th><input type="checkbox" checked onclick="document.querySelectorAll('.inv').forEach(function(c){c.checked=this.checked}.bind(this));calc()"></th><th>เลขที่บิล</th><th>งวด</th><th>สถานะ</th><th class="num">ยอดบิล</th><th class="num">ชำระแล้ว</th><th class="num">ค้าง</th></tr></thead>
+    <tbody>{% for i in invs %}
+      <tr><td><input type="checkbox" class="inv" name="inv_{{ i.id }}" value="1" data-due="{{ i.total - i.paid_amount }}" {{ 'checked' if not form or form.get('inv_' ~ i.id) }}></td>
+        <td><a href="{{ url_for('admin.invoice_detail', invoice_id=i.id) }}" target="_blank">{{ i.invoice_no }}</a></td><td>{{ i|invperiod }}</td>
+        <td>{{ status_badge(i.status) }}</td><td class="num">{{ i.total|baht }}</td><td class="num">{{ i.paid_amount|baht }}</td><td class="num"><b>{{ (i.total - i.paid_amount)|baht }}</b></td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% else %}<p class="muted">ห้องนี้ไม่มีบิลค้างในระบบ — กรอกยอดค้างยกมาด้านล่าง</p>{% endif %}
+  <div class="form-row">
+    <div class="field"><label>ยอดค้างยกมาที่ยังไม่มีบิลในระบบ (บาท)</label><input type="number" step="0.01" min="0" name="lump_amount" value="{{ form.get('lump_amount', '') }}" oninput="calc()">
+      <div class="help">เช่น ค้างก่อนเริ่มใช้ระบบ ระบบจะออกบิลยอดนี้ให้แล้วรวมเข้าแผน</div></div>
+    <div class="field"><label>รายการ</label><input type="text" name="lump_description" value="{{ form.get('lump_description', 'ยอดค้างชำระยกมา') }}"></div>
+    <div class="field"><label>ส่วนลดตามข้อตกลง (บาท)</label><input type="number" step="0.01" min="0" name="discount" value="{{ form.get('discount', '') }}" oninput="calc()">
+      <div class="help">เช่น ลดเบี้ยปรับให้ (เว้นว่าง = ไม่ลด)</div></div>
+  </div>
+  <p>ยอดหนี้ที่ตกลงผ่อน: <b id="total" style="font-size:1.3em">0.00</b> บาท</p>
+
+  <h2>2. เงื่อนไขการผ่อน</h2>
+  <div class="form-row">
+    <div class="field"><label>จำนวนงวด (เดือน)</label><input type="number" min="1" max="240" name="installments" value="{{ form.get('installments', 6) }}" required oninput="calc()"></div>
+    <div class="field"><label>ผ่อนงวดละประมาณ</label><div id="monthly" style="font-size:1.2em;font-weight:700;padding:.4rem 0">—</div></div>
+    <div class="field"><label>เริ่มผ่อนงวดแรก</label><input type="month" name="start_period" value="{{ form.get('start_period') or current_period }}" required></div>
+    <div class="field"><label>วันที่ทำสัญญา</label><input type="date" name="agreement_date" value="{{ form.get('agreement_date') or today }}"></div>
+  </div>
+  <div class="form-row">
+    <div class="field"><label>ชื่อผู้ทำสัญญา</label><input type="text" name="debtor_name" value="{{ form.get('debtor_name') or unit.owner_name or unit.tenant_name }}"></div>
+    <div class="field"><label>เบอร์โทร</label><input type="text" name="debtor_phone" value="{{ form.get('debtor_phone') or unit.phone }}"></div>
+  </div>
+  <div class="field"><label>หมายเหตุ / เงื่อนไขเพิ่มเติม</label><textarea name="note" rows="2" placeholder="เช่น ชำระทุกวันที่ 5 ของเดือน ควบคู่กับค่าส่วนกลางเดือนปัจจุบัน">{{ form.get('note', '') }}</textarea></div>
+  <button class="btn btn-primary">บันทึกแผนประนอมหนี้</button>
+</form>
+<script>
+function calc() {
+  var t = 0;
+  document.querySelectorAll('.inv').forEach(function (c) { if (c.checked) t += parseFloat(c.dataset.due) || 0; });
+  var f = document.getElementById('debt-form');
+  t += parseFloat(f.lump_amount.value) || 0;
+  t -= parseFloat(f.discount.value) || 0;
+  var n = parseInt(f.installments.value) || 0, fmt = function (v) { return v.toLocaleString('th-TH', {minimumFractionDigits: 2, maximumFractionDigits: 2}); };
+  document.getElementById('total').textContent = fmt(Math.max(t, 0));
+  document.getElementById('monthly').textContent = n > 0 && t > 0 ? fmt(Math.ceil(t / n)) + ' บาท' : '—';
+}
+document.querySelectorAll('.inv').forEach(function (c) { c.addEventListener('change', calc); });
+calc();
+</script>
+{% endblock %}

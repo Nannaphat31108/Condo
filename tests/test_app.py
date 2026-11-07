@@ -21,7 +21,7 @@ def reading(prev, curr):
 def test_water_flat_rate_then_per_unit():
     water = ct(method="meter_rate", rate=16, min_charge=65)
     amounts = {u: billing.compute_item(water, {}, reading(100, 100 + u))["amount"] for u in (0, 1, 4, 5, 10)}
-    assert amounts == {0: 65, 1: 65, 4: 65, 5: 80, 10: 160}
+    assert amounts == {0: 0, 1: 65, 4: 65, 5: 80, 10: 160}  # ไม่มีการใช้เลย ไม่เรียกเก็บ
     assert "เหมาจ่าย" in billing.compute_item(water, {}, reading(0, 3))["detail"]
 
 
@@ -1023,9 +1023,10 @@ def test_water_usage_month_note(app, client):
         db = get_db()
         uid = db.execute("SELECT id FROM units").fetchone()[0]
         water = db.execute("SELECT id FROM charge_types WHERE unit_type='room' AND name LIKE 'ค่าน้ำ%'").fetchone()[0]
-    # ค่าเริ่มต้น: บิลงวดพฤศจิกายน ค่าน้ำเป็นของเดือนตุลาคม
+    # ค่าเริ่มต้น: งวดบิล = เดือนที่ใช้น้ำ (กรอกงวดตุลาคม ออกบิลต้นพฤศจิกายน)
     form = sheet_form(client, "/admin/sheet?period=2026-11&type=room")
-    assert form["usage_month"] == "2026-10"
+    assert form["usage_month"] == "2026-11"
+    form["usage_month"] = "2026-10"  # เลือกเดือนเองได้
     form.update({f"curr_{water}_{uid}": "10", "action": "bill"})
     form.pop("_csrf", None)
     s.post("/admin/sheet", form)
@@ -1053,3 +1054,59 @@ def test_water_usage_month_note(app, client):
         b.generate_invoices(db, "2026-12", {}, usage_period=None)
         assert db.execute("SELECT ii.note FROM invoice_items ii JOIN invoices i ON i.id=ii.invoice_id"
                           " WHERE i.period='2026-12' AND charge_type_id=?", (water,)).fetchone()[0] in ("", None)
+
+
+def test_debt_restructure_plan(app, client):
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/import", {"csv_text": "26/5,A,1,30,สมศรี,081\n"})
+    with app.app_context():
+        from condo import billing as b
+        db = get_db()
+        uid = db.execute("SELECT id FROM units").fetchone()[0]
+        unit = db.execute("SELECT * FROM units").fetchone()
+        item = lambda amt: {"charge_type_id": None, "description": "ค่าส่วนกลาง", "detail": "", "quantity": 1,
+                            "unit_label": "", "unit_price": amt, "amount": amt, "vat_amount": 0.0, "sort_order": 1,
+                            "kind": "manual"}
+        for per in ("2026-01", "2026-02", "2026-03"):
+            b.create_invoice(db, unit, per, [item(300.0)], {}, f"{per}-01", f"{per}-15")
+        db.commit()
+    assert "26/5" in client.get("/admin/debts").get_data(as_text=True)
+    form = {"unit_id": uid, "installments": "4", "start_period": "2026-11", "lump_amount": "500",
+            "discount": "100", "agreement_date": "2026-11-07"}
+    with app.app_context():
+        for i in get_db().execute("SELECT id FROM invoices"):
+            form[f"inv_{i[0]}"] = "1"
+    r = s.post("/admin/debts/new", form)
+    plan_url = r.headers["Location"]
+    with app.app_context():
+        db = get_db()
+        plan = db.execute("SELECT * FROM debt_plans").fetchone()
+        assert plan["total"] == 1300 and plan["monthly"] == 325  # 900 + ยกมา 500 - ส่วนลด 100
+        assert db.execute("SELECT COUNT(*) FROM debt_plan_invoices").fetchone()[0] == 4
+    page = client.get(plan_url).get_data(as_text=True)
+    assert "1,300.00" in page and "ตารางผ่อน" in page
+    # ผ่อนงวดแรก 325: ตัดบิลเก่าสุด (300) ก่อน แล้วบิลถัดไป 25 → ได้ใบเสร็จ 2 ใบ
+    s.post(f"/admin/debts/{plan['id']}/pay", {"amount": "325", "paid_at": "2026-11-07", "method": "เงินสด"})
+    with app.app_context():
+        db = get_db()
+        pays = db.execute("SELECT amount, note FROM payments ORDER BY id").fetchall()
+        assert [p["amount"] for p in pays] == [300, 25]
+        assert pays[0]["note"].startswith("ผ่อนประนอมหนี้ งวดที่ 1/4")
+    assert client.get(f"/admin/debts/{plan['id']}/print").status_code == 200
+    s.post(f"/admin/debts/{plan['id']}/pay", {"amount": "975", "paid_at": "2026-11-08", "method": "เงินสด"})
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT status FROM debt_plans").fetchone()[0] == "done"
+        assert not db.execute("SELECT 1 FROM invoices WHERE status!='paid'").fetchone()
+
+
+def test_work_period_remembered_and_zero_water(app, client):
+    from condo import billing as b
+    s = Session(client)
+    s.login("admin", "admin123")
+    # ค่าเริ่มต้นเปิดมาที่งวดเดือนที่แล้ว (ใช้น้ำเดือนที่แล้ว ออกบิลเดือนนี้)
+    assert f'name="period" value="{b.add_months(b.current_period(), -1)}"' in client.get("/admin/sheet").get_data(as_text=True)
+    client.get("/admin/work-period?period=2026-08&next=/admin/sheet")
+    assert 'value="2026-08"' in client.get("/admin/billing").get_data(as_text=True)
+    assert b.billing_dates("2026-10", {})[0] == "2026-11-01"

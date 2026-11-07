@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}ข้อตกลงประนอมหนี้ {{ plan.unit_no }}{% endblock %}
+{% block content %}
+<div class="page-head no-print">
+  <h1>ข้อตกลงประนอมหนี้ — {{ plan.unit_no }}</h1>
+  <div class="actions"><a class="btn" href="{{ url_for('admin.debt_detail', plan_id=plan.id) }}">กลับ</a><button class="btn btn-primary" onclick="window.print()">พิมพ์</button></div>
+</div>
+<article class="debt-doc">
+  <header>
+    <img src="{{ settings.logo or url_for('static', filename='logo.png') }}" alt="" class="debt-logo">
+    <div><b>{{ settings.condo_name }}</b><br><span class="small">{{ settings.address }}{% if settings.phone %} โทร. {{ settings.phone }}{% endif %}</span></div>
+  </header>
+  <h2 class="c">หนังสือข้อตกลงประนอมหนี้และผ่อนชำระ</h2>
+  <p class="r">ทำที่ {{ settings.condo_name }}<br>วันที่ {{ plan.agreement_date|thaidate }}</p>
+  <p>ข้าพเจ้า <b>{{ plan.debtor_name or '.................................................' }}</b>
+    {% if plan.debtor_phone %}โทร. {{ plan.debtor_phone }}{% endif %}
+    {{ 'ผู้เช่า/เจ้าของร้าน' if plan.unit_type == 'shop' else 'เจ้าของร่วม/ผู้ครอบครอง' }}{{ 'ร้าน' if plan.unit_type == 'shop' else 'ห้องชุดเลขที่' }} <b>{{ plan.unit_no }}</b>
+    ยอมรับว่ามีหนี้ค่าใช้จ่ายส่วนกลางและค่าบริการค้างชำระต่อนิติบุคคล ตามรายการบิลแนบท้าย รวมเป็นเงินที่ตกลงผ่อนชำระทั้งสิ้น
+    <b>{{ plan.total|baht }} บาท ({{ plan.total|bahttext }})</b></p>
+  <p>ข้าพเจ้าตกลงผ่อนชำระเป็นจำนวน <b>{{ plan.installments }} งวด</b> งวดละ <b>{{ plan.monthly|baht }} บาท</b>
+    (งวดสุดท้ายเป็นยอดคงเหลือ) เริ่มงวดแรกเดือน <b>{{ plan.start_period|period }}</b> และชำระค่าใช้จ่ายประจำเดือนปัจจุบันตามปกติควบคู่ไปด้วย
+    หากผิดนัดชำระ นิติบุคคลมีสิทธิ์ยกเลิกข้อตกลงนี้และเรียกเก็บยอดคงค้างทั้งหมดได้ทันที</p>
+  {% if plan.note %}<p>เงื่อนไขเพิ่มเติม: {{ plan.note }}</p>{% endif %}
+  <div class="grid grid-2">
+    <table class="debt-table">
+      <thead><tr><th>งวด</th><th>เดือน</th><th class="num">จำนวนเงิน</th><th>วันที่ชำระ / ผู้รับ</th></tr></thead>
+      <tbody>{% for s in schedule %}<tr><td class="c">{{ s.no }}</td><td>{{ s.period|period }}</td><td class="num">{{ s.amount|baht }}</td><td></td></tr>{% endfor %}</tbody>
+    </table>
+    <table class="debt-table">
+      <thead><tr><th>บิลแนบท้าย</th><th>งวด</th><th class="num">ยอดค้างปัจจุบัน</th></tr></thead>
+      <tbody>{% for i in invoices %}<tr><td>{{ i.invoice_no }}</td><td>{{ i|invperiod }}</td><td class="num">{{ (i.total - i.paid_amount)|baht }}</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+  <div class="bill-signs" style="margin-top:2.5rem">
+    <div><div class="line"></div><div>ลงชื่อ ({{ '.' * 40 }})</div><div class="role">ผู้ผ่อนชำระ</div></div>
+    <div><div class="line"></div><div>ลงชื่อ ({{ '.' * 40 }})</div><div class="role">{{ settings.manager_title or 'ผู้จัดการนิติบุคคล' }}</div></div>
+  </div>
+</article>
+{% endblock %}

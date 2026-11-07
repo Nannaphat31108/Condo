@@ -11,6 +11,7 @@ METHOD_LABELS = {
 }
 METER_METHODS = ("meter_rate", "meter_tiered")
 FLAT_RATE_LABEL = "เหมาจ่าย"  # ใช้น้อยกว่าค่าขั้นต่ำ
+NO_USAGE_LABEL = "ไม่มีการใช้ ไม่เรียกเก็บ"
 UNIT_TYPE_LABELS = {"room": "ห้องชุด", "shop": "ร้านค้าหน้าอาคาร"}
 CHARGE_UNIT_TYPE_LABELS = {"all": "ทุกประเภท", "room": "ห้องชุด", "shop": "ร้านค้า"}
 FREQUENCY_LABELS = {"monthly": "ทุกเดือน", "yearly": "ปีละครั้ง", "once": "ครั้งเดียว"}
@@ -73,6 +74,13 @@ def period_label(period):
 def prev_period(period):
     year, month = (int(x) for x in period.split("-"))
     return f"{year - 1}-12" if month == 1 else f"{year}-{month - 1:02d}"
+
+
+def work_period(settings):
+    """งวดที่ทำงานโดยค่าเริ่มต้น: บิลออกเดือนถัดไป = กรอกข้อมูลของเดือนที่แล้ว"""
+    if (settings or {}).get("bill_timing", "after") != "same":
+        return add_months(current_period(), -1)
+    return current_period()
 
 
 def current_period():
@@ -182,6 +190,9 @@ def compute_item(ct, unit, reading=None, override=None):
     if override is not None:
         amount = float(override)
         detail_parts.append("ยอดเฉพาะห้อง")
+    elif method in METER_METHODS and quantity == 0:
+        amount = 0  # ไม่มีการใช้เลย: ไม่เรียกเก็บ (ไม่คิดขั้นต่ำ/เหมาจ่าย)
+        detail_parts.append(NO_USAGE_LABEL)
     elif min_charge and amount < min_charge:
         detail_parts.append(f"{FLAT_RATE_LABEL} {fmt_num(min_charge)}")
         amount = min_charge
@@ -205,6 +216,9 @@ def compute_item(ct, unit, reading=None, override=None):
 
 
 def billing_dates(period, settings):
+    """วันที่ออกบิลและครบกำหนด: ค่าเริ่มต้นออกบิลต้นเดือนถัดไป (ใช้น้ำเดือนตุลาคม ออกบิลต้นพฤศจิกายน)"""
+    if (settings or {}).get("bill_timing", "after") != "same":
+        period = add_months(period, 1)
     year, month = (int(x) for x in period.split("-"))
     day = min(max(int(settings.get("issue_day") or 1), 1), calendar.monthrange(year, month)[1])
     issue = date(year, month, day)
@@ -235,7 +249,7 @@ def usage_note(ct, usage_period):
 
 def default_usage_period(period, settings):
     """เดือนที่ใช้น้ำ/ไฟ ของบิลงวดนี้ตามที่ตั้งค่าไว้ (ค่าเริ่มต้น: เดือนก่อนหน้างวดบิล) None = ไม่แสดง"""
-    mode = (settings or {}).get("meter_note", "prev")
+    mode = (settings or {}).get("meter_note", "same")
     if mode == "same":
         return period
     if mode == "none":

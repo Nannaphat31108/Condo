@@ -7,12 +7,17 @@
   <h1>{% if is_shop %}ร้านค้าอาคาร — มิเตอร์ไฟ / ค่าเช่าพื้นที่ / มิเตอร์น้ำ งวด {{ period|period }}{% else %}กรอกรวมทุกรายการ (ห้องชุด) งวด {{ period|period }}{% endif %}</h1>
   <form method="get" class="filters">
     <input type="hidden" name="type" value="{{ unit_type }}">
-    <div class="field"><label>งวดเดือน</label><input type="month" name="period" value="{{ period }}" onchange="this.form.submit()"></div>
+    <div class="period-nav">
+      <a class="btn btn-sm" href="{{ url_for('admin.sheet', type=unit_type, period=period_prev) }}">◀ {{ period_prev|period }}</a>
+      <div class="field"><label>งวด (เดือนที่ใช้น้ำ) — เลือกเองได้</label><input type="month" name="period" value="{{ period }}" onchange="this.form.submit()"></div>
+      <a class="btn btn-sm" href="{{ url_for('admin.sheet', type=unit_type, period=period_next) }}">{{ period_next|period }} ▶</a>
+    </div>
   </form>
 </div>
 <p class="muted small">เห็นทุกรายการของทุก{{ 'ร้าน' if unit_type == 'shop' else 'ห้อง' }}ในหน้าเดียว — กรอกเลขมิเตอร์ {% if cols|selectattr('kind', 'equalto', 'manual')|list %}ค่าเช่า {% endif %}เบี้ยปรับ และรายการอื่น ๆ แล้วกด
   <b>บันทึก</b> หรือ <b>บันทึกและออกใบแจ้งหนี้</b> ยอดรวมคำนวณให้ทันทีขณะพิมพ์<br>
-  <b>☑ ติ๊กเฉพาะรายการที่ห้องนี้ต้องจ่าย</b> — เอาติ๊กออก = ไม่เรียกเก็บเดือนนี้ · รายการที่ <span class="badge partial">บิลแล้ว</span>/<span class="badge paid">จ่ายแล้ว</span> จะไม่ถูกเก็บซ้ำ
+  <b>งวด {{ period|period }}</b> = ค่าน้ำที่ใช้ในเดือน{{ period|period }} · ออกบิลวันที่ {{ issue_date|thaidate }} ครบกำหนด {{ due_date|thaidate }}<br>
+  <b>☑ ติ๊กเฉพาะรายการที่ห้องนี้ต้องจ่าย</b> (หัวคอลัมน์มีปุ่ม ติ๊กทั้งหมด / เอาออกทั้งหมด) — เอาติ๊กออก = ไม่เรียกเก็บเดือนนี้ · รายการที่ <span class="badge partial">บิลแล้ว</span>/<span class="badge paid">จ่ายแล้ว</span> จะไม่ถูกเก็บซ้ำ
   · กรอกรายการที่เหลือ (เช่น ค่าน้ำที่มาจ่ายทีหลัง) แล้วกด "บันทึกและออกใบแจ้งหนี้" จะได้บิลใบใหม่เฉพาะรายการที่ยังไม่ได้บิล</p>
 
 {% if not rows %}
@@ -44,6 +49,7 @@
             {%- elif col.kind == 'manual' %}กรอกเอง (ทุกเดือน)
             {%- else %}{{ METHOD_LABELS[ct.method] }}{% endif -%}
           </div>
+          <span class="col-tick"><button type="button" class="btn" data-tick="{{ ct.id }}" data-on="1">ติ๊กทั้งหมด</button> <button type="button" class="btn" data-tick="{{ ct.id }}" data-on="0">เอาออก</button></span>
         </th>
         {% endfor %}
         {% for t in penalty_types %}<th class="num">{{ t }}<div class="hint">กรอกเอง</div></th>{% endfor %}
@@ -135,7 +141,8 @@
       amt = tiered(usage, tiers.map(function (t) { return {upto: t.upto == null ? null : num(t.upto), rate: num(t.rate)}; }));
     } else { amt = usage * num(d.rate); }
     amt += num(d.fee);
-    if (num(d.min) && amt < num(d.min)) amt = num(d.min);
+    if (usage === 0) amt = 0;  // ไม่มีการใช้เลย ไม่เรียกเก็บ
+    else if (num(d.min) && amt < num(d.min)) amt = num(d.min);
     amt = Math.round(amt * 100) / 100;
     td.querySelector('.use').textContent = 'ใช้ ' + usage.toLocaleString('th-TH') + ' →';
     td.querySelector('.amt').textContent = fmt(amt);
@@ -173,6 +180,17 @@
   }
   form.addEventListener('input', changed);
   form.addEventListener('change', changed);
+  // ปุ่มหัวคอลัมน์: ติ๊กทั้งหมด / เอาออกทั้งหมด (เฉพาะแถวที่แสดงอยู่ และรายการที่ยังไม่ออกบิล)
+  form.querySelectorAll('[data-tick]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      form.querySelectorAll('tbody tr').forEach(function (tr) {
+        if (tr.style.display === 'none') return;
+        var box = tr.querySelector('td.chg:not(.is-billed) input.inc[name^="inc_' + b.dataset.tick + '_"]');
+        if (box) { box.checked = b.dataset.on === '1'; rowTotal(tr); }
+      });
+      grand();
+    });
+  });
   // Enter = ลงไปช่องเดียวกันของแถวถัดไป (จดมิเตอร์ได้เร็ว)
   form.addEventListener('keydown', function (e) {
     if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;

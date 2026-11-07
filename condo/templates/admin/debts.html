@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}ประนอมหนี้{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>ประนอมหนี้ (ผ่อนชำระหนี้ค้าง)</h1>
+  <form method="get" class="filters">
+    <div class="field"><label>สถานะ</label><select name="status" onchange="this.form.submit()">
+      {% for k, v in statuses.items() %}<option value="{{ k }}" {{ 'selected' if status == k }}>{{ v }}</option>{% endfor %}</select></div>
+  </form>
+</div>
+<p class="muted small">ห้องที่ค้างหลายเดือนและจ่ายครั้งเดียวไม่ไหว ทำข้อตกลงผ่อนเป็นงวด ๆ — เงินที่ผ่อนแต่ละครั้งตัดชำระบิลเก่าที่สุดก่อน
+  ออกใบเสร็จให้อัตโนมัติ และนับเป็นรายรับในรายงานรายวัน/รายเดือน</p>
+
+<div class="card">
+  <h2>สร้างแผนประนอมหนี้</h2>
+  <form method="get" action="{{ url_for('admin.debt_new') }}" class="filters">
+    <div class="field"><label>ห้อง / ร้าน</label><select name="unit_id" required>
+      <option value="">— เลือก —</option>
+      {% for u in units %}<option value="{{ u.id }}">{{ u.unit_no }}{% if u.owner_name %} — {{ u.owner_name }}{% endif %}</option>{% endfor %}</select></div>
+    <button class="btn btn-primary">ถัดไป</button>
+  </form>
+  {% if debtors %}
+  <h3 style="margin-top:1rem">ห้องที่มียอดค้าง (ยังไม่อยู่ในแผนผ่อน)</h3>
+  <div class="table-wrap"><table>
+    <thead><tr><th>ห้อง</th><th>ชื่อ</th><th class="num">จำนวนบิลค้าง</th><th>ค้างตั้งแต่</th><th class="num">ยอดค้าง</th><th></th></tr></thead>
+    <tbody>{% for d in debtors %}
+      <tr><td><b>{{ d.unit_no }}</b></td><td class="small">{{ d.owner_name or d.tenant_name }}</td><td class="num">{{ d.cnt }}</td>
+        <td class="small">{{ d.since|period }}</td><td class="num">{{ d.due|baht }}</td>
+        <td><a class="btn btn-sm" href="{{ url_for('admin.debt_new', unit_id=d.id) }}">ทำแผนผ่อน</a></td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>แผน{{ statuses[status] }} ({{ plans|length }})</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>ห้อง</th><th>ผู้ทำสัญญา</th><th>วันที่ทำสัญญา</th><th class="num">ยอดหนี้</th><th class="num">ผ่อนแล้ว</th><th class="num">คงเหลือ</th><th>งวดถัดไป</th><th></th></tr></thead>
+    <tbody>{% for x in plans %}{% set p = x.plan %}
+      <tr><td><b>{{ p.unit_no }}</b></td><td class="small">{{ p.debtor_name }}</td><td class="small">{{ p.agreement_date|thaidate_short }}</td>
+        <td class="num">{{ p.total|baht }}</td><td class="num">{{ x.paid|baht }}</td><td class="num"><b>{{ x.remaining|baht }}</b></td>
+        <td class="small">{% if x.next %}งวด {{ x.next.no }}/{{ p.installments }} · {{ x.next.period|period }} · {{ x.next.amount|baht }}{% else %}—{% endif %}
+          {% if x.overdue %}<span class="badge unpaid">เกินกำหนด {{ x.overdue }} งวด</span>{% endif %}</td>
+        <td class="nowrap"><a class="btn btn-sm" href="{{ url_for('admin.debt_detail', plan_id=p.id) }}">เปิด / รับเงินผ่อน</a></td></tr>
+    {% else %}<tr><td colspan="8" class="muted">ไม่มีแผน</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endblock %}

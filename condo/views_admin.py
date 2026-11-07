@@ -10,7 +10,7 @@ import sqlite3
 from datetime import date, timedelta
 
 from flask import (Blueprint, Response, abort, flash, g, redirect, render_template, request,
-                   send_file, url_for)
+                   send_file, session, url_for)
 from werkzeug.security import generate_password_hash
 
 from . import billing
@@ -36,8 +36,41 @@ def valid_period(value):
 
 
 def get_period_arg(name="period"):
+    """งวดที่กำลังทำงาน: เลือกแล้วจำไว้ทุกหน้า จนกว่าจะเปลี่ยนเอง"""
     period = request.values.get(name, "")
-    return period if valid_period(period) else billing.current_period()
+    if valid_period(period):
+        session["work_period"] = period
+        return period
+    saved = session.get("work_period")
+    return saved if valid_period(saved) else billing.work_period(get_settings())
+
+
+@bp.app_context_processor
+def inject_work_period():
+    """งวดที่กำลังทำงาน แสดงที่เมนูด้านซ้ายทุกหน้า"""
+    if not getattr(g, "user", None) or g.user["role"] != "admin":
+        return {}
+    saved = session.get("work_period")
+    return {"work_period": saved if valid_period(saved) else billing.work_period(get_settings())}
+
+
+@bp.route("/work-period")
+@admin_required
+def set_work_period():
+    """เลือกงวดที่จะกรอกข้อมูล แล้วกลับไปหน้าเดิม (ใช้กับทุกหน้า: กรอกรวม จดมิเตอร์ ออกบิล รับชำระ)"""
+    period = request.args.get("period", "")
+    if valid_period(period):
+        session["work_period"] = period
+    nxt = request.args.get("next") or url_for("admin.sheet")
+    if not nxt.startswith("/") or nxt.startswith("//"):
+        nxt = url_for("admin.sheet")
+    # หน้าเดิมที่มี ?period= ค้างอยู่: เปลี่ยนเป็นงวดใหม่
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+    parts = urlsplit(nxt)
+    query = [(k, v) for k, v in parse_qsl(parts.query) if k != "period"]
+    if valid_period(period):
+        query.append(("period", period))
+    return redirect(urlunsplit(("", "", parts.path, urlencode(query), "")))
 
 
 def usage_period_arg(period):
@@ -429,7 +462,7 @@ def unit_multi_bill(unit_id):
                 else:
                     amount = usage * float(ct["rate"] or 0)
                 amount += float(ct["fixed_fee"] or 0) * n
-                floor = float(ct["min_charge"] or 0) * n
+                floor = float(ct["min_charge"] or 0) * n if usage else 0  # ไม่มีการใช้เลย ไม่เรียกเก็บ
                 detail = f"ใช้ {billing.fmt_num(usage)} {ct['unit_label'] or ''} ({n} เดือน)"
                 if floor and amount < floor:
                     amount = floor
@@ -1156,8 +1189,11 @@ def sheet():
     counts = dict(db.execute("SELECT unit_type, COUNT(*) FROM units WHERE active=1 GROUP BY unit_type").fetchall())
     read_date = next((r["read_date"] for m in readings.values() for r in m["current"].values() if r["read_date"]),
                      date.today().isoformat())
+    issue_date, due_date = billing.billing_dates(period, get_settings())
     return render_template("admin/sheet.html", period=period, unit_type=unit_type, cols=cols, rows=rows,
                            penalty_types=penalty_types, counts=counts, read_date=read_date,
+                           period_prev=billing.add_months(period, -1), period_next=billing.add_months(period, 1),
+                           issue_date=issue_date, due_date=due_date,
                            usage_month=billing.default_usage_period(period, get_settings()) or "")
 
 
@@ -1726,7 +1762,9 @@ def settings_page():
             if key == "print_mode" and value not in ("color", "eco"):
                 value = "color"
             if key == "meter_note" and value not in ("prev", "same", "none"):
-                value = "prev"
+                value = "same"
+            if key == "bill_timing" and value not in ("after", "same"):
+                value = "after"
             if key == "auto_print_receipt":
                 value = "1" if value else "0"
             if key == "penalty_types":

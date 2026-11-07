@@ -174,6 +174,29 @@ CREATE TABLE IF NOT EXISTS expenses (
 );
 CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
 
+-- ประนอมหนี้: รวมบิลค้างของห้องแล้วผ่อนชำระเป็นงวด ๆ (เงินที่ผ่อนตัดชำระบิลเก่าที่สุดก่อน)
+CREATE TABLE IF NOT EXISTS debt_plans (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    unit_id       INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+    agreement_date TEXT NOT NULL,
+    total         REAL NOT NULL,              -- ยอดหนี้ที่ตกลงผ่อน
+    installments  INTEGER NOT NULL,
+    monthly       REAL NOT NULL,              -- ผ่อนงวดละ (งวดสุดท้ายเป็นเศษที่เหลือ)
+    start_period  TEXT NOT NULL,              -- งวดแรก YYYY-MM
+    paid_base     REAL NOT NULL DEFAULT 0,    -- ยอดที่บิลเหล่านี้ชำระไว้แล้วก่อนทำสัญญา
+    debtor_name   TEXT DEFAULT '',
+    debtor_phone  TEXT DEFAULT '',
+    note          TEXT DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'active',   -- active / done / cancelled
+    created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+CREATE TABLE IF NOT EXISTS debt_plan_invoices (
+    plan_id    INTEGER NOT NULL REFERENCES debt_plans(id) ON DELETE CASCADE,
+    invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    PRIMARY KEY (plan_id, invoice_id)
+);
+
 CREATE TABLE IF NOT EXISTS activity_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER,
@@ -196,7 +219,10 @@ DEFAULT_SETTINGS = {
                       " และประทับตราของนิติบุคคลอาคารชุดเคหะชุมชนคลองจั่น 26",
     "print_mode": "color",           # color = พิมพ์สี, eco = ประหยัดหมึก (ขาวดำ ไม่มีพื้นหลัง)
     "auto_print_receipt": "1",       # รับชำระแล้วพิมพ์ใบเสร็จทันที
-    "meter_note": "prev",            # หมายเหตุเดือนที่ใช้น้ำ/ไฟ ใต้ค่ามิเตอร์: prev = เดือนก่อนงวดบิล, same, none
+    "bill_timing": "after",          # after = บิลงวดตุลาคม (ใช้น้ำ ต.ค.) ออกบิลต้นพฤศจิกายน, same = ออกในเดือนเดียวกัน
+    "meter_note": "same",            # หมายเหตุเดือนที่ใช้น้ำ/ไฟ ใต้ค่ามิเตอร์: same = เดือนเดียวกับงวด, prev, none
+    "water_rate_note": "อัตราค่าน้ำประปา: ใช้ 1-4 หน่วย เหมาจ่าย 65 บาท · 5 หน่วยขึ้นไป หน่วยละ 16 บาท"
+                       " · ไม่มีการใช้น้ำ ไม่เรียกเก็บ",
     # รายการรายจ่ายที่ใช้บ่อย (บรรทัดละ 1 รายการ) แก้ได้ที่ตั้งค่าทั่วไป
     "expense_items_common": "ค่าไฟฟ้าส่วนกลาง\nค่าน้ำประปาส่วนกลาง\nเงินเดือนพนักงาน\nค่ารักษาความปลอดภัย\n"
                             "ค่าทำความสะอาด\nค่าเก็บขยะ\nค่าวัสดุสิ้นเปลือง\nค่าโทรศัพท์ / อินเทอร์เน็ต\nค่าเบี้ยประกันอาคาร",
@@ -349,6 +375,10 @@ def init_db(db):
                    " AND name LIKE 'ค่าไฟ%'")
         db.execute("UPDATE charge_types SET sort_order=2 WHERE unit_type='shop' AND manual_amount=1 AND name='ค่าเช่าพื้นที่'")
         db.execute("INSERT INTO settings (key, value) VALUES ('_shop_order', '1')")
+    # งวดบิล = เดือนที่ใช้น้ำ (ออกบิลเดือนถัดไป) หมายเหตุใต้ค่าน้ำจึงเป็นเดือนเดียวกับงวด
+    if not db.execute("SELECT 1 FROM settings WHERE key='_bill_after'").fetchone():
+        db.execute("DELETE FROM settings WHERE key='meter_note'")
+        db.execute("INSERT INTO settings (key, value) VALUES ('_bill_after', '1')")
     # เพิ่มค่าบริการร้านค้าครั้งเดียว (ถ้าแอดมินลบทิ้งภายหลังจะไม่สร้างซ้ำ)
     if not db.execute("SELECT 1 FROM settings WHERE key='_shop_charges_seeded'").fetchone():
         if not db.execute("SELECT 1 FROM charge_types WHERE unit_type='shop'").fetchone():

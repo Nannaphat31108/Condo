@@ -16,10 +16,17 @@
       </div>
       <div class="field"><label>ช่องทางชำระเงิน</label><textarea name="bank_info" rows="2">{{ settings.bank_info }}</textarea></div>
       <div class="field"><label>หมายเหตุท้ายใบแจ้งหนี้</label><textarea name="invoice_note" rows="2">{{ settings.invoice_note }}</textarea></div>
+      <div class="field"><label>งวดบิลกับเดือนที่ออกบิล</label>
+        <select name="bill_timing">
+          <option value="after" {{ 'selected' if settings.bill_timing != 'same' }}>งวด = เดือนที่ใช้น้ำ ออกบิลเดือนถัดไป (งวดตุลาคม ออกบิลต้นพฤศจิกายน)</option>
+          <option value="same" {{ 'selected' if settings.bill_timing == 'same' }}>ออกบิลในเดือนเดียวกับงวด</option>
+        </select>
+        <div class="help">เปิดระบบมาจะเริ่มที่งวดเดือนที่แล้วให้อัตโนมัติ เปลี่ยนงวดได้ที่ช่อง "กำลังทำงานงวด" เมนูด้านซ้าย</div></div>
+      <div class="field"><label>อัตราค่าน้ำท้ายใบแจ้งหนี้/ใบเสร็จ (ห้องชุด)</label><textarea name="water_rate_note" rows="2">{{ settings.water_rate_note }}</textarea><div class="help">เว้นว่าง = ไม่พิมพ์</div></div>
       <div class="field"><label>หมายเหตุเดือนที่ใช้น้ำ/ไฟ ใต้ค่ามิเตอร์ในบิล</label>
         <select name="meter_note">
-          <option value="prev" {{ 'selected' if settings.meter_note not in ('same', 'none') }}>เดือนก่อนงวดบิล (เช่น บิลพฤศจิกายน → ใช้น้ำเดือนตุลาคม)</option>
-          <option value="same" {{ 'selected' if settings.meter_note == 'same' }}>เดือนเดียวกับงวดบิล</option>
+          <option value="same" {{ 'selected' if settings.meter_note not in ('prev', 'none') }}>เดือนเดียวกับงวดบิล (งวดตุลาคม → ใช้น้ำเดือนตุลาคม)</option>
+          <option value="prev" {{ 'selected' if settings.meter_note == 'prev' }}>เดือนก่อนงวดบิล</option>
           <option value="none" {{ 'selected' if settings.meter_note == 'none' }}>ไม่แสดง</option>
         </select>
         <div class="help">เป็นค่าเริ่มต้น ตอนออกบิลเลือกเดือนเองได้ และแก้ทีละบิลได้ที่หน้าใบแจ้งหนี้</div></div>

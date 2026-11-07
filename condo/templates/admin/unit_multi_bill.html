@@ -114,7 +114,8 @@
         var d = tr.dataset, usage = Math.max((parseFloat(curr.value) || 0) - (parseFloat(tr.querySelector('input[name^=prev_]').value) || 0), 0);
         v = usage * (+d.rate) + (+d.fee) * m;
         note = 'ใช้ ' + usage.toLocaleString('th-TH') + ' หน่วย';
-        if (+d.min && v < +d.min * m) { v = +d.min * m; note += ' (ขั้นต่ำ)'; }
+        if (usage === 0) { v = (+d.fee) * m; note += ' (ไม่มีการใช้ ไม่เรียกเก็บ)'; }
+        else if (+d.min && v < +d.min * m) { v = +d.min * m; note += ' (ขั้นต่ำ)'; }
       }
       tr.querySelector('.line-total').textContent = fmt(v);
       tr.querySelector('.line-note').textContent = note;

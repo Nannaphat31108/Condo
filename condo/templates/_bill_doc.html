@@ -137,5 +137,6 @@
 
   <footer class="bill-foot">
     {{ settings.receipt_footer if is_receipt else inv.note }}
+    {% if settings.water_rate_note and (not unit or unit.unit_type != 'shop') %}<div class="bill-rate-note">{{ settings.water_rate_note }}</div>{% endif %}
   </footer>
 </article>
