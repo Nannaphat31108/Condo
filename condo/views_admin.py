@@ -369,8 +369,13 @@ def unit_history(db, unit_id, limit=24):
     return {"rows": rows, "columns": columns, "outstanding": outstanding, "paid_total": paid_total}
 
 
-def multi_bill_lines(db, unit, months):
-    """ค่าบริการที่ยังไม่ได้บิลในช่วงเดือนที่เลือก (ค่าคงที่รายเดือน และค่ามิเตอร์ เช่น ค่าน้ำ)"""
+def multi_bill_lines(db, unit, months, ranges=None, default=None):
+    """ค่าบริการที่ยังไม่ได้บิลในช่วงเดือนที่เลือก (ค่าคงที่รายเดือน และค่ามิเตอร์ เช่น ค่าน้ำ)
+
+    months = ช่วงเดือนทั้งหมดที่ตรวจ, ranges = {charge_type_id: (ตั้งแต่, ถึง)} ช่วงเดือนแยกของแต่ละรายการ
+    (เช่น ค่าส่วนกลางค้างตั้งแต่ พ.ค. แต่ค่าน้ำค้างตั้งแต่ ส.ค.) ไม่ระบุ = ใช้ช่วง default (หรือทั้งช่วง months)
+    """
+    ranges = ranges or {}
     selections = billing.load_selections(db)
     cts = db.execute("SELECT * FROM charge_types WHERE active=1 AND unit_type IN ('all', ?) ORDER BY sort_order, id",
                      (unit["unit_type"],)).fetchall()
@@ -380,17 +385,22 @@ def multi_bill_lines(db, unit, months):
     lines = []
     for ct in cts:
         sel = selections.get(ct["id"], {})
+        l_from, l_to = ranges.get(ct["id"]) or default or ((months[0], months[-1]) if months else ("", ""))
         # ค่าที่กรอกเองรายห้อง (เช่น ค่าเช่าพื้นที่ร้านค้า): ติ๊กได้เสมอ แม้ยังไม่เคยกรอกยอดไว้
         rule = {**dict(ct), "manual_amount": 0} if ct["manual_amount"] else ct
-        applies = [m for m in months if billing.charge_applies(rule, m, unit, sel) and (m, ct["id"]) not in excluded]
-        due = [m for m in applies if ct["id"] not in billed[m]]
+        all_applies = [m for m in months if billing.charge_applies(rule, m, unit, sel) and (m, ct["id"]) not in excluded]
+        all_due = [m for m in all_applies if ct["id"] not in billed[m]]
+        due = [m for m in all_due if l_from <= m <= l_to]
+        applies = [m for m in all_applies if l_from <= m <= l_to]
         line = {"ct": ct, "months": due, "skipped": [m for m in applies if m not in due],
+                "from": l_from, "to": l_to, "all_due": all_due, "all_applies": all_applies,
                 "meter": ct["method"] in billing.METER_METHODS, "manual": bool(ct["manual_amount"])}
         if line["meter"]:
-            last = db.execute("SELECT curr_reading FROM meter_readings WHERE charge_type_id=? AND unit_id=?"
-                              " AND period<? ORDER BY period DESC LIMIT 1",
-                              (ct["id"], unit["id"], months[0] if months else "9999")).fetchone()
-            line["prev"] = last[0] if last else None
+            line["readings"] = [[r["period"], r["curr_reading"]] for r in db.execute(
+                "SELECT period, curr_reading FROM meter_readings WHERE charge_type_id=? AND unit_id=?"
+                " AND curr_reading IS NOT NULL ORDER BY period", (ct["id"], unit["id"]))]
+            before = [r[1] for r in line["readings"] if r[0] < l_from]
+            line["prev"] = before[-1] if before else None
             line["monthly"] = float(ct["min_charge"] or 0) + float(ct["fixed_fee"] or 0)  # เหมาจ่ายต่อเดือน
         elif line["manual"]:
             line["monthly"] = sel.get(unit["id"]) or 0
@@ -436,7 +446,22 @@ def unit_multi_bill(unit_id):
     if p_to < p_from:
         p_from, p_to = p_to, p_from
     months = billing.months_between(p_from, p_to)
-    lines = multi_bill_lines(db, unit, months)
+    # ช่วงเดือนแยกรายการ (lf_<id> / lt_<id>) ถ้าไม่ระบุ ใช้ช่วงหลักด้านบน
+    ranges = {}
+    for ct_id in [r[0] for r in db.execute("SELECT id FROM charge_types WHERE active=1")]:
+        lf, lt = request.values.get(f"lf_{ct_id}"), request.values.get(f"lt_{ct_id}")
+        if valid_period(lf) or valid_period(lt):
+            lf = lf if valid_period(lf) else p_from
+            lt = lt if valid_period(lt) else p_to
+            ranges[ct_id] = (lf, lt) if lf <= lt else (lt, lf)
+    # ตรวจเดือนที่ค้าง/ออกบิลแล้วในช่วงกว้าง เพื่อให้เปลี่ยนช่วงของแต่ละรายการบนหน้าจอได้ทันที
+    bounds = [p_from, p_to] + [m for r in ranges.values() for m in r]
+    window = billing.months_between(min(bounds + [billing.add_months(current, -60)]),
+                                    max(bounds + [billing.add_months(current, 24)]))
+    lines = multi_bill_lines(db, unit, window, ranges, default=(p_from, p_to))
+    back_args = {"from": p_from, "to": p_to}
+    for ct_id, (lf, lt) in ranges.items():
+        back_args.update({f"lf_{ct_id}": lf, f"lt_{ct_id}": lt})
 
     if request.method == "POST":
         f = request.form
@@ -455,7 +480,7 @@ def unit_multi_bill(unit_id):
                 prev, curr = to_float(f.get(f"prev_{ct['id']}")), to_float(curr_raw)
                 if curr < prev:
                     flash(f"{ct['name']}: เลขมาตรครั้งนี้น้อยกว่าครั้งก่อน", "error")
-                    return redirect(url_for("admin.unit_multi_bill", unit_id=unit_id, **{"from": p_from, "to": p_to}))
+                    return redirect(url_for("admin.unit_multi_bill", unit_id=unit_id, **back_args))
                 usage = curr - prev
                 if ct["method"] == "meter_tiered":
                     amount = billing.calc_tiered(usage, billing.parse_tiers(ct["tiers"]))[0]
@@ -501,19 +526,22 @@ def unit_multi_bill(unit_id):
             })
         if not items:
             flash("ยังไม่ได้เลือกรายการ หรือทุกเดือนในช่วงนี้ออกบิลไปแล้ว", "error")
-            return redirect(url_for("admin.unit_multi_bill", unit_id=unit_id, **{"from": p_from, "to": p_to}))
+            return redirect(url_for("admin.unit_multi_bill", unit_id=unit_id, **back_args))
         settings = get_settings()
         today = date.today().isoformat()
         due_date = (date.today() + timedelta(days=int(settings.get("due_days") or 15))).isoformat()
-        invoice_id, invoice_no = billing.create_invoice(db, unit, p_from, items, settings, today, due_date,
-                                                        period_to=p_to, number_by=today)
+        # งวดของบิล = เดือนแรกถึงเดือนสุดท้ายที่เรียกเก็บจริง (แต่ละรายการอาจคนละช่วงเดือน)
+        spans = [m for i in items for m in (i.get("period_from"), i.get("period_to")) if m]
+        inv_from, inv_to = (min(spans), max(spans)) if spans else (p_from, p_to)
+        invoice_id, invoice_no = billing.create_invoice(db, unit, inv_from, items, settings, today, due_date,
+                                                        period_to=inv_to, number_by=today)
         # เก็บเลขมาตรล่าสุดไว้ เดือนถัดไปจะดึงเป็นเลขครั้งก่อนให้อัตโนมัติ
         for ct, period, prev, curr in readings:
             db.execute("INSERT INTO meter_readings (charge_type_id, unit_id, period, prev_reading, curr_reading, read_date)"
                        " VALUES (?,?,?,?,?,?) ON CONFLICT (charge_type_id, unit_id, period) DO UPDATE SET"
                        " prev_reading=excluded.prev_reading, curr_reading=excluded.curr_reading, read_date=excluded.read_date",
                        (ct["id"], unit_id, period, prev, curr, today))
-        log_activity(g.user, f"ออกบิลหลายเดือน {invoice_no} ห้อง {unit['unit_no']} ({p_from} ถึง {p_to})")
+        log_activity(g.user, f"ออกบิลหลายเดือน {invoice_no} ห้อง {unit['unit_no']} ({inv_from} ถึง {inv_to})")
         if f.get("pay_now"):
             inv = db.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
             receipt_no = record_payment(db, inv, inv["total"], f.get("paid_at") or today,
@@ -532,7 +560,8 @@ def unit_multi_bill(unit_id):
     skipped = sorted({m for line in lines for m in line["skipped"]})
     return render_template("admin/unit_multi_bill.html", unit=unit, p_from=p_from, p_to=p_to, months=months,
                            lines=lines, current=current, today=date.today().isoformat(), methods=PAYMENT_METHODS,
-                           ahead=ahead, skipped=skipped, penalty_types=penalty_type_list())
+                           ahead=ahead, skipped=skipped, penalty_types=penalty_type_list(),
+                           window_from=window[0], window_to=window[-1])
 
 
 @bp.route("/units/<int:unit_id>/history")

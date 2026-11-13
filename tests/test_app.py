@@ -860,7 +860,7 @@ def test_multi_bill_water_and_advance_months(app, client):
     s.post("/admin/sheet", form)
     page = client.get(f"/admin/units/{uid}/multi-bill?ahead=4").get_data(as_text=True)
     nxt, last = b.add_months(cur, 1), b.add_months(cur, 4)
-    assert f"{b.period_label(nxt)} – {b.period_label(last)}, 4 เดือน" in page
+    assert f"{b.period_label(nxt)} – {b.period_label(last)} (4 เดือน)" in page
     s.post(f"/admin/units/{uid}/multi-bill", {"from": nxt, "to": last, **{f"inc_{ct}": "1" for ct in fixed},
                                               f"inc_{water}": "1", f"monthly_{water}": "65"})
     with app.app_context():
@@ -870,6 +870,53 @@ def test_multi_bill_water_and_advance_months(app, client):
     # เดือนที่จ่ายล่วงหน้าแล้ว ค่าน้ำไม่ถูกเก็บซ้ำในบิลรายเดือน
     form = sheet_form(client, f"/admin/sheet?period={nxt}&type=room")
     assert f"curr_{water}_{uid}" not in form
+
+
+def test_multi_bill_different_months_per_charge(app, client):
+    """ค้างคนละเดือน: ค่าส่วนกลางค้างตั้งแต่ พ.ค. ค่าน้ำค้าง ส.ค. ค่าขยะ/ค่าประกันค้างตั้งแต่ เม.ย. — ออกในบิลเดียว"""
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/new", {"unit_no": "26/7", "unit_type": "room", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        uid = db.execute("SELECT id FROM units").fetchone()[0]
+        cts = {r["name"]: r["id"] for r in db.execute("SELECT * FROM charge_types WHERE active=1")}
+    common, water, garbage, insurance = (cts["ค่าส่วนกลาง"], cts["ค่าน้ำประปา"], cts["ค่าขยะ"], cts["ค่าประกัน"])
+    page = client.get(f"/admin/units/{uid}/multi-bill?from=2026-04&to=2026-09"
+                      f"&lf_{common}=2026-05&lf_{water}=2026-08&lt_{water}=2026-08").get_data(as_text=True)
+    assert f'name="lf_{common}" value="2026-05"' in page and f'name="lt_{water}" value="2026-08"' in page
+    assert f'name="lf_{garbage}" value="2026-04"' in page
+    s.post(f"/admin/units/{uid}/multi-bill", {
+        "from": "2026-04", "to": "2026-09",
+        f"inc_{common}": "1", f"lf_{common}": "2026-05", f"lt_{common}": "2026-09",
+        f"inc_{water}": "1", f"lf_{water}": "2026-08", f"lt_{water}": "2026-08", f"monthly_{water}": "65",
+        f"inc_{garbage}": "1", f"lf_{garbage}": "2026-04", f"lt_{garbage}": "2026-09",
+        f"inc_{insurance}": "1", f"lf_{insurance}": "2026-04", f"lt_{insurance}": "2026-09",
+    })
+    with app.app_context():
+        db = get_db()
+        inv = db.execute("SELECT * FROM invoices ORDER BY id DESC").fetchone()
+        assert (inv["period"], inv["period_to"]) == ("2026-04", "2026-09")
+        items = {r["charge_type_id"]: r for r in db.execute("SELECT * FROM invoice_items WHERE invoice_id=?",
+                                                             (inv["id"],))}
+        assert (items[common]["period_from"], items[common]["period_to"], items[common]["amount"]) == \
+            ("2026-05", "2026-09", 5 * 250)
+        assert (items[water]["period_from"], items[water]["period_to"], items[water]["amount"]) == \
+            ("2026-08", "2026-08", 65)
+        assert (items[garbage]["period_from"], items[garbage]["amount"]) == ("2026-04", 6 * 20)
+        assert (items[insurance]["period_from"], items[insurance]["amount"]) == ("2026-04", 6 * 10)
+        assert inv["total"] == 5 * 250 + 65 + 6 * 20 + 6 * 10
+    # ค่าส่วนกลางเดือน เม.ย. และค่าน้ำเดือนอื่นยังไม่ถูกเก็บ ออกบิลทีหลังได้
+    page = client.get(f"/admin/units/{uid}/multi-bill?from=2026-04&to=2026-09").get_data(as_text=True)
+    with app.app_context():
+        from condo.views_admin import multi_bill_lines
+        from condo import billing as b
+        db = get_db()
+        unit = db.execute("SELECT * FROM units WHERE id=?", (uid,)).fetchone()
+        lines = {l["ct"]["id"]: l for l in multi_bill_lines(db, unit, b.months_between("2026-04", "2026-09"))}
+        assert lines[common]["months"] == ["2026-04"]
+        assert lines[water]["months"] == ["2026-04", "2026-05", "2026-06", "2026-07", "2026-09"]
+        assert lines[garbage]["months"] == []
 
 
 def test_multi_bill_penalties(app, client):
