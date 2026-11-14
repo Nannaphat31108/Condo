@@ -1685,6 +1685,12 @@ def report_daily():
     issued = db.execute("SELECT COUNT(*) AS cnt, COALESCE(SUM(total),0) AS total FROM invoices"
                         " WHERE issue_date=? AND status!='void'", (day,)).fetchone()
     day_expenses = db.execute("SELECT * FROM expenses WHERE expense_date=? ORDER BY category, id", (day,)).fetchall()
+    # ใบเสร็จที่ออก (บันทึก) วันนี้ แต่ลงวันที่ชำระเป็นวันอื่น -> ไม่นับในยอดวันนี้ แต่แสดงไว้ให้ตรวจครบทุกใบ
+    other_day = db.execute(
+        "SELECT p.*, COALESCE(u.unit_no, i.unit_no) AS unit_no FROM payments p JOIN invoices i ON i.id=p.invoice_id"
+        " LEFT JOIN units u ON u.id=i.unit_id WHERE substr(p.created_at,1,10)=? AND p.paid_at!=?"
+        " ORDER BY p.id", (day, day)).fetchall()
+    numbers = sorted(r["p"]["receipt_no"] for r in rows)
     # ตารางรายวันทั้งเดือน
     y, mo = (int(x) for x in month.split("-"))
     last_day = calendar.monthrange(y, mo)[1]
@@ -1704,7 +1710,8 @@ def report_daily():
             [[d, v["count"], *[v["parts"].get(c, 0) for c in cols], v["total"]] for d, v in sorted(days.items())],
         )
     return render_template("admin/report_daily.html", day=day, month=month, rows=rows, by_item=by_item,
-                           day_expenses=day_expenses,
+                           day_expenses=day_expenses, other_day=other_day,
+                           first_no=numbers[0] if numbers else "", last_no=numbers[-1] if numbers else "",
                            item_cols=item_columns(rows), by_method=by_method, issued=issued, cols=cols,
                            days=sorted(days.items()), month_totals=month_totals,
                            month_total=billing.money(sum(d["total"] for d in days.values())),

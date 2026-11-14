@@ -1223,3 +1223,35 @@ def test_work_period_remembered_and_zero_water(app, client):
     client.get("/admin/work-period?period=2026-08&next=/admin/sheet")
     assert 'value="2026-08"' in client.get("/admin/billing").get_data(as_text=True)
     assert b.billing_dates("2026-10", {})[0] == "2026-11-01"
+
+
+def test_daily_report_lists_every_receipt_and_backdated_ones(app, client):
+    from flask import g
+    from condo import billing as b
+    from condo.views_admin import record_payment
+    s = Session(client)
+    s.login("admin", "admin123")
+    for n in range(1, 4):
+        s.post("/admin/units/new", {"unit_no": f"26/{n}", "unit_type": "room", "active": "1"})
+    today = __import__("datetime").date.today().isoformat()
+    with app.test_request_context():
+        db = get_db()
+        g.user = db.execute("SELECT * FROM users").fetchone()
+        ct = db.execute("SELECT * FROM charge_types WHERE name='ค่าส่วนกลาง'").fetchone()
+        for i, unit in enumerate(db.execute("SELECT * FROM units ORDER BY id").fetchall()):
+            iid, _ = b.create_invoice(db, unit, "2026-10", [b.charge_item(db, ct, unit, "2026-10", b.load_selections(db))],
+                                      {}, today, today)
+            inv = db.execute("SELECT * FROM invoices WHERE id=?", (iid,)).fetchone()
+            # ใบที่ 3 บันทึกวันนี้ แต่ลงวันที่ชำระเป็นเมื่อวาน
+            paid = today if i < 2 else b.add_months(today[:7], -1) + "-15"
+            record_payment(db, inv, inv["total"], paid, "เงินสด")
+        db.commit()
+    page = client.get(f"/admin/reports/daily?date={today}").get_data(as_text=True)
+    assert "ใบเสร็จวันนี้ (2 ใบ" in page and "รวม 2 ใบ" in page
+    assert "ลงวันที่ชำระเป็นวันอื่น (1 ใบ" in page and "ห้อง 26/3" in page
+
+
+def test_app_uses_thai_time():
+    import time
+    import condo  # noqa: F401
+    assert time.localtime().tm_gmtoff == 7 * 3600

@@ -1,6 +1,13 @@
 """โปรแกรมบริหารนิติบุคคลอาคารชุด / หมู่บ้าน"""
 import os
 import secrets
+import time
+
+# เวลาไทย: เซิร์ฟเวอร์ (เช่น Render) ใช้เวลา UTC ซึ่งช้ากว่าไทย 7 ชั่วโมง ทำให้ "วันนี้" ผิดวัน
+# (ใบเสร็จช่วงเช้าก่อน 7 โมงไปลงวันก่อนหน้า และไม่ขึ้นในรายงานรายวัน) ตั้ง CONDO_TZ เพื่อเปลี่ยนได้
+os.environ["TZ"] = os.environ.get("CONDO_TZ", "ICT-7")  # UTC+7 ไม่ต้องพึ่งไฟล์ tzdata
+if hasattr(time, "tzset"):
+    time.tzset()
 
 from flask import Flask, abort, request, session
 
