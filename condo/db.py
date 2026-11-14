@@ -197,6 +197,25 @@ CREATE TABLE IF NOT EXISTS debt_plan_invoices (
     PRIMARY KEY (plan_id, invoice_id)
 );
 
+-- ใบเสร็จที่ยกเลิก หรือถูกล้างตอนรีเซ็ต/ลบห้อง: เก็บไว้ ไม่ลบทิ้ง (เลขที่ไม่ถูกใช้ซ้ำ ตรวจย้อนหลังได้)
+CREATE TABLE IF NOT EXISTS payments_cancelled (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    payment_id   INTEGER,
+    invoice_id   INTEGER,
+    invoice_no   TEXT DEFAULT '',
+    unit_no      TEXT DEFAULT '',
+    receipt_no   TEXT NOT NULL,
+    paid_at      TEXT NOT NULL,
+    amount       REAL NOT NULL,
+    method       TEXT DEFAULT '',
+    reference    TEXT DEFAULT '',
+    note         TEXT DEFAULT '',
+    created_by   INTEGER,
+    created_at   TEXT,
+    cancelled_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    cancelled_by INTEGER,
+    reason       TEXT DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS activity_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER,
