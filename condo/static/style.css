@@ -154,6 +154,7 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
 }
 @media print {
+  .table-wrap { overflow: visible !important; }
   body { background: #fff; font-size: 13px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .layout { display: block; }
   .sidebar, .topbar, .no-print, .flash { display: none !important; }
@@ -400,6 +401,11 @@ input.cell { padding: .3rem .45rem; width: 120px; text-align: right; }
   .report-daily .name-cell { max-width: 60mm; }
   .report-daily .help { display: none; }
   .report-daily tr { break-inside: avoid; }
+  /* ตารางยาวหลายหน้า: ห้ามตัดทิ้ง พิมพ์ครบทุกแถว และหัวตารางซ้ำทุกหน้า */
+  .report-daily .table-wrap { overflow: visible !important; }
+  .report-daily .card, .report-daily table { break-inside: auto; page-break-inside: auto; }
+  .report-daily thead { display: table-header-group; }
+  .report-daily tfoot { display: table-row-group; }
 }
 .report-daily table.by-item { max-width: 460px; }
 @media print { .report-daily .grid-4 { grid-template-columns: repeat(4, 1fr); } }
@@ -427,3 +433,6 @@ table.by-item { max-width: 640px; }
 @media print { .debt-doc { border: 0; padding: 0; max-width: none; } }
 .debt-doc .grid { align-items: start; }
 .bill-foot .bill-rate-note { color: #333; font-size: 1.05em; }
+.line-range { display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.line-range input[type=month] { width: 9.5rem; padding: .25rem .35rem; }
+.range-note { margin-top: .2rem; }

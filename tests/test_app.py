@@ -860,7 +860,7 @@ def test_multi_bill_water_and_advance_months(app, client):
     s.post("/admin/sheet", form)
     page = client.get(f"/admin/units/{uid}/multi-bill?ahead=4").get_data(as_text=True)
     nxt, last = b.add_months(cur, 1), b.add_months(cur, 4)
-    assert f"{b.period_label(nxt)} – {b.period_label(last)}, 4 เดือน" in page
+    assert f"{b.period_label(nxt)} – {b.period_label(last)} (4 เดือน)" in page
     s.post(f"/admin/units/{uid}/multi-bill", {"from": nxt, "to": last, **{f"inc_{ct}": "1" for ct in fixed},
                                               f"inc_{water}": "1", f"monthly_{water}": "65"})
     with app.app_context():
@@ -870,6 +870,119 @@ def test_multi_bill_water_and_advance_months(app, client):
     # เดือนที่จ่ายล่วงหน้าแล้ว ค่าน้ำไม่ถูกเก็บซ้ำในบิลรายเดือน
     form = sheet_form(client, f"/admin/sheet?period={nxt}&type=room")
     assert f"curr_{water}_{uid}" not in form
+
+
+def test_multi_bill_different_months_per_charge(app, client):
+    """ค้างคนละเดือน: ค่าส่วนกลางค้างตั้งแต่ พ.ค. ค่าน้ำค้าง ส.ค. ค่าขยะ/ค่าประกันค้างตั้งแต่ เม.ย. — ออกในบิลเดียว"""
+    s = Session(client)
+    s.login("admin", "admin123")
+    s.post("/admin/units/new", {"unit_no": "26/7", "unit_type": "room", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        uid = db.execute("SELECT id FROM units").fetchone()[0]
+        cts = {r["name"]: r["id"] for r in db.execute("SELECT * FROM charge_types WHERE active=1")}
+    common, water, garbage, insurance = (cts["ค่าส่วนกลาง"], cts["ค่าน้ำประปา"], cts["ค่าขยะ"], cts["ค่าประกัน"])
+    page = client.get(f"/admin/units/{uid}/multi-bill?from=2026-04&to=2026-09"
+                      f"&lf_{common}=2026-05&lf_{water}=2026-08&lt_{water}=2026-08").get_data(as_text=True)
+    assert f'name="lf_{common}" value="2026-05"' in page and f'name="lt_{water}" value="2026-08"' in page
+    assert f'name="lf_{garbage}" value="2026-04"' in page
+    s.post(f"/admin/units/{uid}/multi-bill", {
+        "from": "2026-04", "to": "2026-09",
+        f"inc_{common}": "1", f"lf_{common}": "2026-05", f"lt_{common}": "2026-09",
+        f"inc_{water}": "1", f"lf_{water}": "2026-08", f"lt_{water}": "2026-08", f"monthly_{water}": "65",
+        f"inc_{garbage}": "1", f"lf_{garbage}": "2026-04", f"lt_{garbage}": "2026-09",
+        f"inc_{insurance}": "1", f"lf_{insurance}": "2026-04", f"lt_{insurance}": "2026-09",
+    })
+    with app.app_context():
+        db = get_db()
+        inv = db.execute("SELECT * FROM invoices ORDER BY id DESC").fetchone()
+        assert (inv["period"], inv["period_to"]) == ("2026-04", "2026-09")
+        items = {r["charge_type_id"]: r for r in db.execute("SELECT * FROM invoice_items WHERE invoice_id=?",
+                                                             (inv["id"],))}
+        assert (items[common]["period_from"], items[common]["period_to"], items[common]["amount"]) == \
+            ("2026-05", "2026-09", 5 * 250)
+        assert (items[water]["period_from"], items[water]["period_to"], items[water]["amount"]) == \
+            ("2026-08", "2026-08", 65)
+        assert (items[garbage]["period_from"], items[garbage]["amount"]) == ("2026-04", 6 * 20)
+        assert (items[insurance]["period_from"], items[insurance]["amount"]) == ("2026-04", 6 * 10)
+        assert inv["total"] == 5 * 250 + 65 + 6 * 20 + 6 * 10
+    # ค่าส่วนกลางเดือน เม.ย. และค่าน้ำเดือนอื่นยังไม่ถูกเก็บ ออกบิลทีหลังได้
+    page = client.get(f"/admin/units/{uid}/multi-bill?from=2026-04&to=2026-09").get_data(as_text=True)
+    with app.app_context():
+        from condo.views_admin import multi_bill_lines
+        from condo import billing as b
+        db = get_db()
+        unit = db.execute("SELECT * FROM units WHERE id=?", (uid,)).fetchone()
+        lines = {l["ct"]["id"]: l for l in multi_bill_lines(db, unit, b.months_between("2026-04", "2026-09"))}
+        assert lines[common]["months"] == ["2026-04"]
+        assert lines[water]["months"] == ["2026-04", "2026-05", "2026-06", "2026-07", "2026-09"]
+        assert lines[garbage]["months"] == []
+
+
+def _room_with_charges(app, s, unit_no):
+    s.post("/admin/units/new", {"unit_no": unit_no, "unit_type": "room", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        uid = db.execute("SELECT id FROM units WHERE unit_no=?", (unit_no,)).fetchone()[0]
+        cts = {r["name"]: r["id"] for r in db.execute("SELECT * FROM charge_types WHERE active=1")}
+    return uid, cts
+
+
+def test_multi_bill_includes_months_unticked_from_monthly_bill(app, client):
+    """ต.ค. เคยถูกติ๊กออกจากบิลรายเดือน (bill_exclusions) -> เลือก ก.ค.–ต.ค. ต้องได้ครบ 4 เดือน ไม่ต้องรีเซ็ตห้อง"""
+    s = Session(client)
+    s.login("admin", "admin123")
+    uid, cts = _room_with_charges(app, s, "26/185")
+    fixed = [cts[n] for n in ("ค่าส่วนกลาง", "ค่ารักษามิเตอร์", "ค่าขยะ", "ค่าประกัน")]
+    with app.app_context():
+        db = get_db()
+        for ct in cts.values():
+            db.execute("INSERT INTO bill_exclusions (unit_id, period, charge_type_id) VALUES (?,?,?)", (uid, "2026-10", ct))
+        db.commit()
+    page = client.get(f"/admin/units/{uid}/multi-bill?from=2026-07&to=2026-10").get_data(as_text=True)
+    assert "เดือนที่เคยเอาออกจากบิลรายเดือน" in page
+    s.post(f"/admin/units/{uid}/multi-bill", {"from": "2026-07", "to": "2026-10", **{f"inc_{c}": "1" for c in fixed},
+                                              f"inc_{cts['ค่าน้ำประปา']}": "1", f"monthly_{cts['ค่าน้ำประปา']}": "65"})
+    with app.app_context():
+        db = get_db()
+        inv = db.execute("SELECT * FROM invoices ORDER BY id DESC").fetchone()
+        assert (inv["period"], inv["period_to"]) == ("2026-07", "2026-10")
+        assert inv["total"] == 4 * (250 + 65 + 25 + 20 + 10)
+        assert db.execute("SELECT COUNT(*) FROM bill_exclusions WHERE unit_id=? AND charge_type_id IN (?,?,?,?)",
+                          (uid, *fixed)).fetchone()[0] == 0
+
+
+def test_multi_bill_merges_unpaid_monthly_bill(app, client):
+    """ต.ค. ออกบิลรายเดือนไปแล้วแต่ยังไม่จ่าย -> ลูกบ้านจ่าย ก.ค.–ต.ค. รวมเป็นบิล/ใบเสร็จใบเดียว"""
+    from condo import billing as b
+    s = Session(client)
+    s.login("admin", "admin123")
+    uid, cts = _room_with_charges(app, s, "26/185")
+    fixed = [cts[n] for n in ("ค่าส่วนกลาง", "ค่ารักษามิเตอร์", "ค่าขยะ", "ค่าประกัน")]
+    with app.app_context():
+        db = get_db()
+        unit = db.execute("SELECT * FROM units WHERE id=?", (uid,)).fetchone()
+        ct_rows = db.execute("SELECT * FROM charge_types WHERE id IN (?,?,?,?)", fixed).fetchall()
+        items = [b.charge_item(db, ct, unit, "2026-10", b.load_selections(db)) for ct in ct_rows]
+        old_id, old_no = b.create_invoice(db, unit, "2026-10", items, {}, "2026-11-01", "2026-11-15")
+        db.commit()
+    page = client.get(f"/admin/units/{uid}/multi-bill?from=2026-07&to=2026-10").get_data(as_text=True)
+    assert f'name="merge_{old_id}"' in page and old_no in page
+    s.post(f"/admin/units/{uid}/multi-bill", {"from": "2026-07", "to": "2026-10", **{f"inc_{c}": "1" for c in fixed},
+                                              f"merge_{old_id}": "1", "pay_now": "1", "paid_at": "2026-11-13",
+                                              "method": "เงินสด"})
+    with app.app_context():
+        db = get_db()
+        inv = db.execute("SELECT * FROM invoices ORDER BY id DESC").fetchone()
+        assert (inv["period"], inv["period_to"], inv["status"]) == ("2026-07", "2026-10", "paid")
+        assert inv["total"] == 4 * (250 + 25 + 20 + 10)
+        assert db.execute("SELECT status FROM invoices WHERE id=?", (old_id,)).fetchone()[0] == "void"
+        descs = [r[0] for r in db.execute("SELECT description FROM invoice_items WHERE invoice_id=?", (inv["id"],))]
+        assert "ค่าส่วนกลาง (ตุลาคม 2569)" in descs
+        assert db.execute("SELECT COUNT(*) FROM payments WHERE invoice_id=?", (inv["id"],)).fetchone()[0] == 1
+    # ต.ค. ยังนับว่าออกบิลแล้ว ไม่ถูกเก็บซ้ำ
+    page = client.get(f"/admin/units/{uid}/multi-bill?from=2026-07&to=2026-10").get_data(as_text=True)
+    assert "ไม่มีเดือนที่ต้องเก็บ" in page
 
 
 def test_multi_bill_penalties(app, client):
@@ -1110,3 +1223,35 @@ def test_work_period_remembered_and_zero_water(app, client):
     client.get("/admin/work-period?period=2026-08&next=/admin/sheet")
     assert 'value="2026-08"' in client.get("/admin/billing").get_data(as_text=True)
     assert b.billing_dates("2026-10", {})[0] == "2026-11-01"
+
+
+def test_daily_report_lists_every_receipt_and_backdated_ones(app, client):
+    from flask import g
+    from condo import billing as b
+    from condo.views_admin import record_payment
+    s = Session(client)
+    s.login("admin", "admin123")
+    for n in range(1, 4):
+        s.post("/admin/units/new", {"unit_no": f"26/{n}", "unit_type": "room", "active": "1"})
+    today = __import__("datetime").date.today().isoformat()
+    with app.test_request_context():
+        db = get_db()
+        g.user = db.execute("SELECT * FROM users").fetchone()
+        ct = db.execute("SELECT * FROM charge_types WHERE name='ค่าส่วนกลาง'").fetchone()
+        for i, unit in enumerate(db.execute("SELECT * FROM units ORDER BY id").fetchall()):
+            iid, _ = b.create_invoice(db, unit, "2026-10", [b.charge_item(db, ct, unit, "2026-10", b.load_selections(db))],
+                                      {}, today, today)
+            inv = db.execute("SELECT * FROM invoices WHERE id=?", (iid,)).fetchone()
+            # ใบที่ 3 บันทึกวันนี้ แต่ลงวันที่ชำระเป็นเมื่อวาน
+            paid = today if i < 2 else b.add_months(today[:7], -1) + "-15"
+            record_payment(db, inv, inv["total"], paid, "เงินสด")
+        db.commit()
+    page = client.get(f"/admin/reports/daily?date={today}").get_data(as_text=True)
+    assert "ใบเสร็จวันนี้ (2 ใบ" in page and "รวม 2 ใบ" in page
+    assert "ลงวันที่ชำระเป็นวันอื่น (1 ใบ" in page and "ห้อง 26/3" in page
+
+
+def test_app_uses_thai_time():
+    import time
+    import condo  # noqa: F401
+    assert time.localtime().tm_gmtoff == 7 * 3600

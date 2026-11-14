@@ -8,7 +8,8 @@
     <a class="btn" href="{{ url_for('admin.unit_history_page', unit_id=unit.id) }}" data-history="{{ url_for('admin.unit_history_page', unit_id=unit.id, partial=1) }}">ประวัติ</a></div>
 </div>
 <p class="muted">ออกบิลรวมหลายเดือนในใบเดียว (ใบเสร็จใบเดียว) — เดือนที่ออกบิลไปแล้วระบบข้ามให้อัตโนมัติ ไม่เก็บซ้ำ
-  · ค่าน้ำ/ค่าไฟ: ใส่เลขมาตร (คิดตามหน่วยที่ใช้) หรือเหมาจ่ายต่อเดือน</p>
+  · ค่าน้ำ/ค่าไฟ: ใส่เลขมาตร (คิดตามหน่วยที่ใช้) หรือเหมาจ่ายต่อเดือน
+  · <b>แต่ละรายการเลือกเดือนเองได้</b> ในช่อง "ค้างเดือน" (เช่น ค่าส่วนกลางค้างตั้งแต่ พ.ค. แต่ค่าน้ำค้างตั้งแต่ ส.ค.)</p>
 
 <div class="card">
   <h2>1. เลือกช่วงเดือน</h2>
@@ -35,13 +36,15 @@
 <form method="post" id="bill-form">
   {{ csrf() }}<input type="hidden" name="from" value="{{ p_from }}"><input type="hidden" name="to" value="{{ p_to }}">
   <div class="card">
-    <h2>2. รายการที่จะเรียกเก็บ ({{ p_from|period }} – {{ p_to|period }}, {{ months|length }} เดือน)</h2>
-    {% if skipped %}<div class="flash info">เดือนที่ออกบิลไปแล้ว ระบบไม่นับซ้ำ: {% for m in skipped %}{{ m|period }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
+    <h2>2. รายการที่จะเรียกเก็บ</h2>
+    <p class="help">ช่วงหลัก {{ p_from|period }} – {{ p_to|period }} ({{ months|length }} เดือน) — เปลี่ยนเดือนของแต่ละรายการได้ที่ช่อง "ค้างเดือน" ยอดคำนวณใหม่ทันที</p>
+    {% if skipped %}<div class="flash info">เดือนที่ออกบิลไปแล้ว ระบบไม่นับซ้ำ: {% for m in skipped %}{{ m|period }}{{ ', ' if not loop.last }}{% endfor %}
+      {% if open_invoices %}— ถ้าบิลเดิมยังไม่ได้ชำระ ติ๊ก "รวมบิลค้างชำระเดิม" ด้านล่าง เพื่อออกใบเสร็จใบเดียว{% endif %}</div>{% endif %}
     <div class="table-wrap"><table>
-      <thead><tr><th></th><th>รายการ</th><th class="num">บาท / เดือน</th><th class="num">จำนวนเดือน</th><th class="num">รวม (บาท)</th><th>หมายเหตุ</th></tr></thead>
+      <thead><tr><th></th><th>รายการ</th><th class="num">บาท / เดือน</th><th class="num">จำนวนเดือน</th><th class="num">รวม (บาท)</th><th>ค้างเดือน (ตั้งแต่ – ถึง)</th></tr></thead>
       <tbody>
       {% for l in lines %}{% set ct = l.ct %}
-        <tr data-line {% if l.meter %}data-meter data-rate="{{ ct.rate }}" data-min="{{ ct.min_charge }}" data-fee="{{ ct.fixed_fee }}"{% endif %}>
+        <tr data-line data-due='{{ l.all_due|tojson }}' data-applies='{{ l.all_applies|tojson }}' data-excluded='{{ l.all_excluded|tojson }}' {% if l.meter %}data-meter data-rate="{{ ct.rate }}" data-min="{{ ct.min_charge }}" data-fee="{{ ct.fixed_fee }}" data-readings='{{ l.readings|tojson }}'{% endif %}>
           <td><input type="checkbox" name="inc_{{ ct.id }}" value="1" {{ 'checked' if l.months and (l.monthly or l.meter) }} {{ 'disabled' if not l.months }}></td>
           <td><b>{{ ct.name }}</b>{% if l.manual %} <span class="muted small">กรอกยอดต่อเดือน{{ '' if l.monthly else ' (ยังไม่เคยกรอก — ใส่ยอดแล้วติ๊ก)' }}</span>{% endif %}
             {% if l.meter and l.months %}
@@ -53,11 +56,28 @@
           <td class="num">{% if l.meter %}<span class="muted small">เหมาจ่าย</span><br>{% endif %}<input class="cell monthly" type="number" step="0.01" min="0" name="monthly_{{ ct.id }}" value="{{ '%.2f'|format(l.monthly) }}" {{ 'disabled' if not l.months }}></td>
           <td class="num" data-months="{{ l.months|length }}">{{ l.months|length }}</td>
           <td class="num"><b class="line-total"></b><div class="muted small line-note"></div></td>
-          <td class="small muted">{% if l.months %}{{ l.months[0]|period }}{% if l.months|length > 1 %} – {{ l.months[-1]|period }}{% endif %}{% endif %}
+          <td class="small"><div class="line-range">
+              <input type="month" name="lf_{{ ct.id }}" value="{{ l.from }}" min="{{ window_from }}" max="{{ window_to }}" aria-label="{{ ct.name }} ตั้งแต่เดือน">
+              <span>–</span>
+              <input type="month" name="lt_{{ ct.id }}" value="{{ l.to }}" min="{{ window_from }}" max="{{ window_to }}" aria-label="{{ ct.name }} ถึงเดือน"></div>
+            <div class="muted range-note">{% if l.months %}{{ l.months[0]|period }}{% if l.months|length > 1 %} – {{ l.months[-1]|period }}{% endif %}{% endif %}
             {% if l.skipped %}<div>ข้าม {{ l.skipped|length }} เดือนที่ออกบิลแล้ว</div>{% endif %}
-            {% if not l.months and not l.skipped %}ไม่มีเดือนที่ต้องเก็บ{% endif %}</td>
+            {% if l.excluded %}<div>รวม {{ l.excluded|length }} เดือนที่เคยเอาออกจากบิลรายเดือน</div>{% endif %}
+            {% if not l.months and not l.skipped %}ไม่มีเดือนที่ต้องเก็บ{% endif %}</div></td>
         </tr>
       {% endfor %}
+        {% for inv in open_invoices %}
+        <tr class="merge-row">
+          <td><input type="checkbox" class="merge" name="merge_{{ inv.id }}" value="1" data-amount="{{ inv.total }}"
+            {{ 'checked' if not inv.paid_amount else 'disabled' }}></td>
+          <td colspan="3"><b>รวมบิลค้างชำระเดิม</b> เลขที่ <a href="{{ url_for('admin.invoice_detail', invoice_id=inv.id) }}" target="_blank">{{ inv.invoice_no }}</a>
+            ({{ inv.period|period }}{% if inv.period_to and inv.period_to != inv.period %} – {{ inv.period_to|period }}{% endif %})
+            {% if inv.paid_amount %}<div class="muted small">ชำระไปแล้วบางส่วน — รับชำระที่บิลเดิมแยกต่างหาก</div>
+            {% else %}<div class="muted small">ย้ายทุกรายการของบิลนี้มารวมในบิลใหม่ และยกเลิกใบเดิม (เก็บไว้เป็นประวัติ)</div>{% endif %}</td>
+          <td class="num"><b>{{ '{:,.2f}'.format(inv.total - inv.paid_amount) }}</b></td>
+          <td></td>
+        </tr>
+        {% endfor %}
         {% for t in penalty_types %}
         <tr>
           <td></td>
@@ -102,6 +122,40 @@
     b.addEventListener('click', function () { var r = b.dataset.range.split(',').map(Number); rf.from.value = shift(r[0]); rf.to.value = shift(r[1]); rf.submit(); });
   });
   var form = document.getElementById('bill-form');
+  var TH = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+  function th(p) { var a = p.split('-'); return TH[+a[1] - 1] + ' ' + String((+a[0] + 543) % 100).padStart(2, '0'); }
+  // เปลี่ยนช่วงเดือนของรายการ: นับเดือนที่ยังไม่ได้บิลในช่วงนั้นใหม่ทันที
+  function setRange(tr, autoCheck) {
+    var lf = tr.querySelector('input[name^=lf_]'), lt = tr.querySelector('input[name^=lt_]');
+    var a = lf.value, b = lt.value;
+    if (!a || !b) return;
+    if (b < a) { var t = a; a = b; b = t; }
+    var due = JSON.parse(tr.dataset.due).filter(function (m) { return m >= a && m <= b; });
+    var skip = JSON.parse(tr.dataset.applies).filter(function (m) { return m >= a && m <= b && due.indexOf(m) < 0; });
+    var cell = tr.querySelector('[data-months]'), box = tr.querySelector('input[type=checkbox]');
+    cell.dataset.months = due.length; cell.textContent = due.length;
+    var note = due.length ? th(due[0]) + (due.length > 1 ? ' – ' + th(due[due.length - 1]) : '') : '';
+    if (skip.length) note += '<div>ข้าม ' + skip.length + ' เดือนที่ออกบิลแล้ว</div>';
+    var exc = JSON.parse(tr.dataset.excluded || '[]').filter(function (m) { return due.indexOf(m) >= 0; });
+    if (exc.length) note += '<div>รวม ' + exc.length + ' เดือนที่เคยเอาออกจากบิลรายเดือน</div>';
+    if (!due.length && !skip.length) note = 'ไม่มีเดือนที่ต้องเก็บ';
+    tr.querySelector('.range-note').innerHTML = note;
+    box.disabled = !due.length;
+    tr.querySelector('input.monthly').disabled = !due.length;
+    if (!due.length) box.checked = false; else if (autoCheck) box.checked = true;
+    var prev = tr.querySelector('input[name^=prev_]');
+    if (prev && !prev.dataset.touched && tr.dataset.readings) {
+      var before = JSON.parse(tr.dataset.readings).filter(function (r) { return r[0] < a; });
+      prev.value = before.length ? before[before.length - 1][1] : '';
+    }
+  }
+  form.querySelectorAll('[data-line]').forEach(function (tr) {
+    tr.querySelectorAll('input[type=month]').forEach(function (i) {
+      i.addEventListener('change', function () { setRange(tr, true); calc(); });
+    });
+    var prev = tr.querySelector('input[name^=prev_]');
+    if (prev) prev.addEventListener('input', function () { prev.dataset.touched = 1; });
+  });
   function fmt(v) { return v.toLocaleString('th-TH', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
   function calc() {
     var total = 0;
@@ -123,6 +177,10 @@
       if (on.checked) total += v;
     });
     form.querySelectorAll('input.extra-amt').forEach(function (i) { total += parseFloat(i.value) || 0; });
+    form.querySelectorAll('input.merge').forEach(function (i) {
+      i.closest('tr').style.opacity = i.checked ? 1 : .45;
+      if (i.checked) total += parseFloat(i.dataset.amount) || 0;
+    });
     document.getElementById('grand-total').innerHTML = '<b>' + fmt(total) + '</b>';
   }
   form.addEventListener('input', calc); form.addEventListener('change', calc); calc();
