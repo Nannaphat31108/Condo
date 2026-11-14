@@ -388,12 +388,15 @@ def multi_bill_lines(db, unit, months, ranges=None, default=None):
         l_from, l_to = ranges.get(ct["id"]) or default or ((months[0], months[-1]) if months else ("", ""))
         # ค่าที่กรอกเองรายห้อง (เช่น ค่าเช่าพื้นที่ร้านค้า): ติ๊กได้เสมอ แม้ยังไม่เคยกรอกยอดไว้
         rule = {**dict(ct), "manual_amount": 0} if ct["manual_amount"] else ct
-        all_applies = [m for m in months if billing.charge_applies(rule, m, unit, sel) and (m, ct["id"]) not in excluded]
+        # เดือนที่เคยเอาออกจากบิลรายเดือน (ติ๊กออก/ลบรายการ) ยังเรียกเก็บได้ในหน้านี้ เพราะแอดมินเลือกเดือนเอง
+        all_applies = [m for m in months if billing.charge_applies(rule, m, unit, sel)]
         all_due = [m for m in all_applies if ct["id"] not in billed[m]]
+        all_excluded = [m for m in all_due if (m, ct["id"]) in excluded]
         due = [m for m in all_due if l_from <= m <= l_to]
         applies = [m for m in all_applies if l_from <= m <= l_to]
         line = {"ct": ct, "months": due, "skipped": [m for m in applies if m not in due],
                 "from": l_from, "to": l_to, "all_due": all_due, "all_applies": all_applies,
+                "all_excluded": all_excluded, "excluded": [m for m in due if m in all_excluded],
                 "meter": ct["method"] in billing.METER_METHODS, "manual": bool(ct["manual_amount"])}
         if line["meter"]:
             line["readings"] = [[r["period"], r["curr_reading"]] for r in db.execute(
@@ -459,6 +462,11 @@ def unit_multi_bill(unit_id):
     window = billing.months_between(min(bounds + [billing.add_months(current, -60)]),
                                     max(bounds + [billing.add_months(current, 24)]))
     lines = multi_bill_lines(db, unit, window, ranges, default=(p_from, p_to))
+    # บิลที่ออกไปแล้วแต่ยังไม่ได้ชำระเลย ในช่วงที่เลือก -> รวมเข้าบิลใบนี้ได้ (ใบเสร็จใบเดียว)
+    lo, hi = min(bounds), max(bounds)
+    open_invoices = db.execute(
+        "SELECT * FROM invoices WHERE unit_id=? AND status IN ('unpaid','partial') AND period<=?"
+        " AND COALESCE(period_to, period)>=? ORDER BY period, id", (unit_id, hi, lo)).fetchall()
     back_args = {"from": p_from, "to": p_to}
     for ct_id, (lf, lt) in ranges.items():
         back_args.update({f"lf_{ct_id}": lf, f"lt_{ct_id}": lt})
@@ -517,6 +525,23 @@ def unit_multi_bill(unit_id):
                     "charge_type_id": None, "description": name, "detail": "", "quantity": 1, "unit_label": "",
                     "unit_price": amount, "amount": amount, "vat_amount": 0.0, "sort_order": 950, "kind": "penalty",
                 })
+        merged = []
+        ct_order = {r["id"]: r["sort_order"] for r in db.execute("SELECT id, sort_order FROM charge_types")}
+        for inv in open_invoices:
+            if not f.get(f"merge_{inv['id']}") or inv["paid_amount"] > 0:
+                continue
+            merged.append(inv)
+            inv_label = range_label(billing.months_between(inv["period"], inv["period_to"] or inv["period"]))
+            for it in db.execute("SELECT * FROM invoice_items WHERE invoice_id=? ORDER BY sort_order, id",
+                                 (inv["id"],)):
+                item = {c: it[c] for c in billing.ITEM_COLUMNS}
+                if it["charge_type_id"] and not it["period_from"]:
+                    item.update(period_from=inv["period"], period_to=inv["period_to"] or inv["period"])
+                if not it["period_from"] and inv_label not in it["description"]:
+                    item["description"] = f"{it['description']} ({inv_label})"
+                item["sort_order"] = ct_order.get(it["charge_type_id"], 950 if it["kind"] == "penalty" else 900)
+                item["merged_from"] = inv["id"]
+                items.append(item)
         lump = billing.money(to_float(f.get("lump_amount")))
         if lump:
             items.append({
@@ -535,13 +560,24 @@ def unit_multi_bill(unit_id):
         inv_from, inv_to = (min(spans), max(spans)) if spans else (p_from, p_to)
         invoice_id, invoice_no = billing.create_invoice(db, unit, inv_from, items, settings, today, due_date,
                                                         period_to=inv_to, number_by=today)
+        # บิลเดิมที่รวมเข้ามาแล้ว: ยกเลิกใบเดิม (เก็บไว้เป็นประวัติ) รายการเพิ่มเติมย้ายมาอยู่ใบใหม่
+        for inv in merged:
+            db.execute("UPDATE invoices SET status='void', note=TRIM(COALESCE(note,'') || ' รวมเข้าบิล ' || ?)"
+                       " WHERE id=?", (invoice_no, inv["id"]))
+            db.execute("UPDATE adhoc_charges SET invoice_id=? WHERE invoice_id=?", (invoice_id, inv["id"]))
+        # เดือนที่เคยติ๊กออกจากบิลรายเดือน แต่ออกบิลในหน้านี้แล้ว: ล้างเครื่องหมายไม่เก็บ
+        for item in items:
+            if item.get("charge_type_id") and item.get("period_from") and not item.get("merged_from"):
+                db.execute("DELETE FROM bill_exclusions WHERE unit_id=? AND charge_type_id=? AND period BETWEEN ? AND ?",
+                           (unit_id, item["charge_type_id"], item["period_from"], item["period_to"]))
         # เก็บเลขมาตรล่าสุดไว้ เดือนถัดไปจะดึงเป็นเลขครั้งก่อนให้อัตโนมัติ
         for ct, period, prev, curr in readings:
             db.execute("INSERT INTO meter_readings (charge_type_id, unit_id, period, prev_reading, curr_reading, read_date)"
                        " VALUES (?,?,?,?,?,?) ON CONFLICT (charge_type_id, unit_id, period) DO UPDATE SET"
                        " prev_reading=excluded.prev_reading, curr_reading=excluded.curr_reading, read_date=excluded.read_date",
                        (ct["id"], unit_id, period, prev, curr, today))
-        log_activity(g.user, f"ออกบิลหลายเดือน {invoice_no} ห้อง {unit['unit_no']} ({inv_from} ถึง {inv_to})")
+        log_activity(g.user, f"ออกบิลหลายเดือน {invoice_no} ห้อง {unit['unit_no']} ({inv_from} ถึง {inv_to})"
+                     + (" รวมบิล " + ", ".join(i["invoice_no"] for i in merged) if merged else ""))
         if f.get("pay_now"):
             inv = db.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
             receipt_no = record_payment(db, inv, inv["total"], f.get("paid_at") or today,
@@ -561,7 +597,7 @@ def unit_multi_bill(unit_id):
     return render_template("admin/unit_multi_bill.html", unit=unit, p_from=p_from, p_to=p_to, months=months,
                            lines=lines, current=current, today=date.today().isoformat(), methods=PAYMENT_METHODS,
                            ahead=ahead, skipped=skipped, penalty_types=penalty_type_list(),
-                           window_from=window[0], window_to=window[-1])
+                           window_from=window[0], window_to=window[-1], open_invoices=open_invoices)
 
 
 @bp.route("/units/<int:unit_id>/history")

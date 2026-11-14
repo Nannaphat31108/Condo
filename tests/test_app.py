@@ -919,6 +919,72 @@ def test_multi_bill_different_months_per_charge(app, client):
         assert lines[garbage]["months"] == []
 
 
+def _room_with_charges(app, s, unit_no):
+    s.post("/admin/units/new", {"unit_no": unit_no, "unit_type": "room", "active": "1"})
+    with app.app_context():
+        db = get_db()
+        uid = db.execute("SELECT id FROM units WHERE unit_no=?", (unit_no,)).fetchone()[0]
+        cts = {r["name"]: r["id"] for r in db.execute("SELECT * FROM charge_types WHERE active=1")}
+    return uid, cts
+
+
+def test_multi_bill_includes_months_unticked_from_monthly_bill(app, client):
+    """ต.ค. เคยถูกติ๊กออกจากบิลรายเดือน (bill_exclusions) -> เลือก ก.ค.–ต.ค. ต้องได้ครบ 4 เดือน ไม่ต้องรีเซ็ตห้อง"""
+    s = Session(client)
+    s.login("admin", "admin123")
+    uid, cts = _room_with_charges(app, s, "26/185")
+    fixed = [cts[n] for n in ("ค่าส่วนกลาง", "ค่ารักษามิเตอร์", "ค่าขยะ", "ค่าประกัน")]
+    with app.app_context():
+        db = get_db()
+        for ct in cts.values():
+            db.execute("INSERT INTO bill_exclusions (unit_id, period, charge_type_id) VALUES (?,?,?)", (uid, "2026-10", ct))
+        db.commit()
+    page = client.get(f"/admin/units/{uid}/multi-bill?from=2026-07&to=2026-10").get_data(as_text=True)
+    assert "เดือนที่เคยเอาออกจากบิลรายเดือน" in page
+    s.post(f"/admin/units/{uid}/multi-bill", {"from": "2026-07", "to": "2026-10", **{f"inc_{c}": "1" for c in fixed},
+                                              f"inc_{cts['ค่าน้ำประปา']}": "1", f"monthly_{cts['ค่าน้ำประปา']}": "65"})
+    with app.app_context():
+        db = get_db()
+        inv = db.execute("SELECT * FROM invoices ORDER BY id DESC").fetchone()
+        assert (inv["period"], inv["period_to"]) == ("2026-07", "2026-10")
+        assert inv["total"] == 4 * (250 + 65 + 25 + 20 + 10)
+        assert db.execute("SELECT COUNT(*) FROM bill_exclusions WHERE unit_id=? AND charge_type_id IN (?,?,?,?)",
+                          (uid, *fixed)).fetchone()[0] == 0
+
+
+def test_multi_bill_merges_unpaid_monthly_bill(app, client):
+    """ต.ค. ออกบิลรายเดือนไปแล้วแต่ยังไม่จ่าย -> ลูกบ้านจ่าย ก.ค.–ต.ค. รวมเป็นบิล/ใบเสร็จใบเดียว"""
+    from condo import billing as b
+    s = Session(client)
+    s.login("admin", "admin123")
+    uid, cts = _room_with_charges(app, s, "26/185")
+    fixed = [cts[n] for n in ("ค่าส่วนกลาง", "ค่ารักษามิเตอร์", "ค่าขยะ", "ค่าประกัน")]
+    with app.app_context():
+        db = get_db()
+        unit = db.execute("SELECT * FROM units WHERE id=?", (uid,)).fetchone()
+        ct_rows = db.execute("SELECT * FROM charge_types WHERE id IN (?,?,?,?)", fixed).fetchall()
+        items = [b.charge_item(db, ct, unit, "2026-10", b.load_selections(db)) for ct in ct_rows]
+        old_id, old_no = b.create_invoice(db, unit, "2026-10", items, {}, "2026-11-01", "2026-11-15")
+        db.commit()
+    page = client.get(f"/admin/units/{uid}/multi-bill?from=2026-07&to=2026-10").get_data(as_text=True)
+    assert f'name="merge_{old_id}"' in page and old_no in page
+    s.post(f"/admin/units/{uid}/multi-bill", {"from": "2026-07", "to": "2026-10", **{f"inc_{c}": "1" for c in fixed},
+                                              f"merge_{old_id}": "1", "pay_now": "1", "paid_at": "2026-11-13",
+                                              "method": "เงินสด"})
+    with app.app_context():
+        db = get_db()
+        inv = db.execute("SELECT * FROM invoices ORDER BY id DESC").fetchone()
+        assert (inv["period"], inv["period_to"], inv["status"]) == ("2026-07", "2026-10", "paid")
+        assert inv["total"] == 4 * (250 + 25 + 20 + 10)
+        assert db.execute("SELECT status FROM invoices WHERE id=?", (old_id,)).fetchone()[0] == "void"
+        descs = [r[0] for r in db.execute("SELECT description FROM invoice_items WHERE invoice_id=?", (inv["id"],))]
+        assert "ค่าส่วนกลาง (ตุลาคม 2569)" in descs
+        assert db.execute("SELECT COUNT(*) FROM payments WHERE invoice_id=?", (inv["id"],)).fetchone()[0] == 1
+    # ต.ค. ยังนับว่าออกบิลแล้ว ไม่ถูกเก็บซ้ำ
+    page = client.get(f"/admin/units/{uid}/multi-bill?from=2026-07&to=2026-10").get_data(as_text=True)
+    assert "ไม่มีเดือนที่ต้องเก็บ" in page
+
+
 def test_multi_bill_penalties(app, client):
     from condo import billing as b
     s = Session(client)
