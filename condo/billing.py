@@ -1,6 +1,7 @@
 """เครื่องคำนวณค่าใช้จ่ายและออกใบแจ้งหนี้อัตโนมัติ"""
 import calendar
 import json
+import re
 from datetime import date, timedelta
 
 METHOD_LABELS = {
@@ -226,15 +227,26 @@ def billing_dates(period, settings):
     return issue.isoformat(), due.isoformat()
 
 
+RECEIPT_LOG = re.compile(r"^รับชำระ (\S+) ([\d,]+(?:\.\d+)?) บาท \((\d+/\d{2}/\d{4})\)$")
+
+
 def next_number(db, table, column, period):
     """เลขที่เอกสารรันใหม่ทุกเดือน รูปแบบ 0001/10/2026 (ลำดับ/เดือน/ปี)
 
     period คือ 'YYYY-MM' หรือวันที่ 'YYYY-MM-DD' ของเดือนที่ออกเอกสาร
+    ใบเสร็จ: เลขที่เคยออกไปแล้ว (แม้ถูกยกเลิก/ล้างไปภายหลัง) จะไม่ถูกนำกลับมาใช้ซ้ำ
     """
     year, month = period[:4], period[5:7]
     suffix = f"/{month}/{year}"
-    rows = db.execute(f"SELECT {column} FROM {table} WHERE {column} LIKE ?", ("%" + suffix,)).fetchall()
-    seq = max((int(r[0].split("/")[0]) for r in rows if r[0].split("/")[0].isdigit()), default=0) + 1
+    used = [r[0] for r in db.execute(f"SELECT {column} FROM {table} WHERE {column} LIKE ?", ("%" + suffix,))]
+    if table == "payments":
+        used += [r[0] for r in db.execute("SELECT receipt_no FROM payments_cancelled WHERE receipt_no LIKE ?",
+                                          ("%" + suffix,))]
+        for (action,) in db.execute("SELECT action FROM activity_log WHERE action LIKE ?", (f"รับชำระ %{suffix})",)):
+            m = RECEIPT_LOG.match(action)
+            if m:
+                used.append(m.group(3))
+    seq = max((int(n.split("/")[0]) for n in used if n and n.split("/")[0].isdigit()), default=0) + 1
     return f"{seq:04d}{suffix}"
 
 
@@ -412,6 +424,16 @@ def generate_invoices(db, period, settings, unit_ids=None, usage_period=False):
         result["created"].append(invoice_no)
     db.commit()
     return result
+
+
+def archive_payments(db, where, params, reason, user_id=None):
+    """ย้ายใบเสร็จไปเก็บที่ payments_cancelled แทนการลบทิ้ง (where ใช้ชื่อย่อ p = payments, i = invoices)"""
+    join = " FROM payments p LEFT JOIN invoices i ON i.id=p.invoice_id WHERE " + where
+    db.execute("INSERT INTO payments_cancelled (payment_id, invoice_id, invoice_no, unit_no, receipt_no, paid_at, amount,"
+               " method, reference, note, created_by, created_at, cancelled_by, reason)"
+               " SELECT p.id, p.invoice_id, i.invoice_no, i.unit_no, p.receipt_no, p.paid_at, p.amount, p.method,"
+               " p.reference, p.note, p.created_by, p.created_at, ?, ?" + join, (user_id, reason, *params))
+    db.execute("DELETE FROM payments WHERE id IN (SELECT p.id" + join + ")", params)
 
 
 def void_invoice(db, invoice_id):

@@ -615,7 +615,9 @@ def reset_unit_data(db, unit_id, clear_contacts=False, clear_rent=False):
     if clear_rent:  # ยอดที่กรอกเองรายห้อง/ร้าน เช่น ค่าเช่าพื้นที่
         db.execute("DELETE FROM charge_type_units WHERE unit_id=? AND charge_type_id IN"
                    " (SELECT id FROM charge_types WHERE manual_amount=1)", (unit_id,))
-    db.execute("DELETE FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE unit_id=?)", (unit_id,))
+    # ใบเสร็จเดิมไม่ลบทิ้ง: เก็บไว้เป็นประวัติ ยังขึ้นในรายงานรายวัน และเลขที่ไม่ถูกใช้ซ้ำ
+    billing.archive_payments(db, "i.unit_id=?", (unit_id,), "รีเซ็ตข้อมูลห้อง",
+                             g.user["id"] if g.get("user") else None)
     db.execute("DELETE FROM adhoc_charges WHERE unit_id=?", (unit_id,))
     db.execute("DELETE FROM invoices WHERE unit_id=?", (unit_id,))
     db.execute("DELETE FROM meter_readings WHERE unit_id=?", (unit_id,))
@@ -675,7 +677,7 @@ def unit_bulk_delete():
                 kept.append(u["unit_no"])
                 continue
             # ลบประวัติบิลของห้องนี้ (การชำระเงิน/รายการในบิลถูกลบตามอัตโนมัติ)
-            db.execute("DELETE FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE unit_id=?)", (u["id"],))
+            billing.archive_payments(db, "i.unit_id=?", (u["id"],), "ลบห้อง", g.user["id"])
             db.execute("DELETE FROM invoices WHERE unit_id=?", (u["id"],))
             db.execute("DELETE FROM units WHERE id=?", (u["id"],))
             deleted.append(u["unit_no"])
@@ -1577,7 +1579,7 @@ def penalties():
 def payment_delete(payment_id):
     db = get_db()
     p = get_or_404("SELECT * FROM payments WHERE id=?", (payment_id,))
-    db.execute("DELETE FROM payments WHERE id=?", (payment_id,))
+    billing.archive_payments(db, "p.id=?", (payment_id,), "ยกเลิกใบเสร็จ", g.user["id"])
     billing.refresh_invoice_status(db, p["invoice_id"])
     log_activity(g.user, f"ยกเลิกใบเสร็จ {p['receipt_no']}")
     db.commit()
@@ -1691,6 +1693,21 @@ def report_daily():
         " LEFT JOIN units u ON u.id=i.unit_id WHERE substr(p.created_at,1,10)=? AND p.paid_at!=?"
         " ORDER BY p.id", (day, day)).fetchall()
     numbers = sorted(r["p"]["receipt_no"] for r in rows)
+    # ใบเสร็จของวันนี้ที่ถูกยกเลิก / ล้างตอนรีเซ็ตห้อง (ไม่นับในยอดรับเงิน แต่แสดงให้นับเลขที่ได้ครบ)
+    cancelled = [dict(r) for r in db.execute(
+        "SELECT * FROM payments_cancelled WHERE paid_at=? OR (substr(created_at,1,10)=? AND paid_at!=?)"
+        " ORDER BY receipt_no", (day, day, day))]
+    # ใบเสร็จที่ถูกลบไปก่อนมีที่เก็บประวัติ: กู้จากประวัติการใช้งาน ("รับชำระ ... (เลขที่ใบเสร็จ)")
+    known = {r[0] for r in db.execute("SELECT receipt_no FROM payments UNION SELECT receipt_no FROM payments_cancelled")}
+    for log in db.execute("SELECT * FROM activity_log WHERE substr(created_at,1,10)=? AND action LIKE 'รับชำระ %'"
+                          " ORDER BY id", (day,)):
+        m = billing.RECEIPT_LOG.match(log["action"])
+        if m and m.group(3) not in known:
+            known.add(m.group(3))
+            cancelled.append({"receipt_no": m.group(3), "invoice_no": m.group(1), "unit_no": "",
+                              "amount": float(m.group(2).replace(",", "")), "paid_at": day, "created_at": log["created_at"],
+                              "cancelled_at": "", "reason": "ถูกลบไปแล้ว (จากประวัติการใช้งาน)"})
+    cancelled.sort(key=lambda r: r["receipt_no"])
     # ตารางรายวันทั้งเดือน
     y, mo = (int(x) for x in month.split("-"))
     last_day = calendar.monthrange(y, mo)[1]
@@ -1710,7 +1727,7 @@ def report_daily():
             [[d, v["count"], *[v["parts"].get(c, 0) for c in cols], v["total"]] for d, v in sorted(days.items())],
         )
     return render_template("admin/report_daily.html", day=day, month=month, rows=rows, by_item=by_item,
-                           day_expenses=day_expenses, other_day=other_day,
+                           day_expenses=day_expenses, other_day=other_day, cancelled=cancelled,
                            first_no=numbers[0] if numbers else "", last_no=numbers[-1] if numbers else "",
                            item_cols=item_columns(rows), by_method=by_method, issued=issued, cols=cols,
                            days=sorted(days.items()), month_totals=month_totals,

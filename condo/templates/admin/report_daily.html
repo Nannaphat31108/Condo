@@ -14,7 +14,8 @@
 <div class="grid grid-4" style="margin-bottom:1.25rem">
   <div class="stat"><div class="label">รับเงินวันนี้</div><div class="value">{{ rows|sum(attribute='p.amount')|baht }}</div><div class="sub">บาท</div></div>
   <div class="stat"><div class="label">จำนวนใบเสร็จ</div><div class="value">{{ rows|length }}</div>
-    <div class="sub">ใบ{% if first_no %} · เลขที่ {{ first_no }}{% if last_no != first_no %} – {{ last_no }}{% endif %}{% endif %}</div></div>
+    <div class="sub">ใบ{% if first_no %} · เลขที่ {{ first_no }}{% if last_no != first_no %} – {{ last_no }}{% endif %}{% endif %}
+      {% if cancelled %}<br>ยกเลิก/ถูกล้าง {{ cancelled|length }} ใบ (ออกทั้งหมด {{ rows|length + cancelled|length }} ใบ){% endif %}</div></div>
   <div class="stat"><div class="label">ช่องทางรับเงิน</div>
     {% for m, v in by_method.items() %}<div class="small"><b>{{ m }}</b> {{ v[0] }} ใบ · {{ v[1]|baht }}</div>{% else %}<div class="sub">—</div>{% endfor %}</div>
   <div class="stat"><div class="label">ออกใบแจ้งหนี้วันนี้</div><div class="value">{{ issued.cnt }}</div><div class="sub">ยอด {{ issued.total|baht }} บาท</div></div>
@@ -62,6 +63,18 @@
       {% else %}<tr><td colspan="6" class="muted">ไม่มี</td></tr>{% endfor %}</tbody>
       {% if rows %}<tfoot><tr><td></td><td colspan="4">รวม {{ rows|length }} ใบ</td><td class="num">{{ rows|sum(attribute='p.amount')|baht }}</td></tr></tfoot>{% endif %}
     </table></div>
+    {% if cancelled %}
+    <h2 style="margin-top:1rem">ใบเสร็จที่ยกเลิก / ถูกล้าง ({{ cancelled|length }} ใบ — ไม่นับในยอดรับเงินวันนี้)</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>เลขที่</th><th>ห้อง / บิล</th><th>สาเหตุ</th><th>วันที่ชำระ</th><th class="num">จำนวนเงิน</th></tr></thead>
+      <tbody>{% for c in cancelled %}
+        <tr><td>{{ c.receipt_no }}</td><td class="small">{{ c.unit_no or '' }}{% if c.invoice_no %} · บิล {{ c.invoice_no }}{% endif %}</td>
+          <td class="small">{{ c.reason }}{% if c.cancelled_at %} · {{ c.cancelled_at[:16] }}{% endif %}</td>
+          <td class="small">{{ c.paid_at|thaidate_short }}</td><td class="num">{{ c.amount|baht }}</td></tr>
+      {% endfor %}</tbody>
+      <tfoot><tr><td colspan="4">รวม {{ cancelled|length }} ใบ</td><td class="num">{{ cancelled|sum(attribute='amount')|baht }}</td></tr></tfoot>
+    </table></div>
+    {% endif %}
     {% if other_day %}
     <div class="flash info" style="margin-top:.75rem">ใบเสร็จที่บันทึกวันนี้ แต่ลงวันที่ชำระเป็นวันอื่น ({{ other_day|length }} ใบ — นับยอดในวันที่ชำระ):
       {% for p in other_day %}<a href="{{ url_for('admin.report_daily', date=p.paid_at) }}">{{ p.receipt_no }}</a> ห้อง {{ p.unit_no }} ลงวันที่ {{ p.paid_at|thaidate_short }} ({{ p.amount|baht }}){{ ', ' if not loop.last }}{% endfor %}</div>

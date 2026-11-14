@@ -1255,3 +1255,43 @@ def test_app_uses_thai_time():
     import time
     import condo  # noqa: F401
     assert time.localtime().tm_gmtoff == 7 * 3600
+
+
+def test_reset_and_cancel_keep_receipts_in_daily_report(app, client):
+    """รีเซ็ตห้อง / ยกเลิกใบเสร็จ: ใบเสร็จไม่หายจากรายงานรายวัน และเลขที่ไม่ถูกใช้ซ้ำ"""
+    from flask import g
+    from condo import billing as b
+    from condo.views_admin import record_payment
+    s = Session(client)
+    s.login("admin", "admin123")
+    for n in range(1, 4):
+        s.post("/admin/units/new", {"unit_no": f"26/{n}", "unit_type": "room", "active": "1"})
+    today = __import__("datetime").date.today().isoformat()
+    with app.test_request_context():
+        db = get_db()
+        g.user = db.execute("SELECT * FROM users").fetchone()
+        ct = db.execute("SELECT * FROM charge_types WHERE name='ค่าส่วนกลาง'").fetchone()
+        pays = []
+        for unit in db.execute("SELECT * FROM units ORDER BY id").fetchall():
+            iid, _ = b.create_invoice(db, unit, "2026-10", [b.charge_item(db, ct, unit, "2026-10", b.load_selections(db))],
+                                      {}, today, today)
+            inv = db.execute("SELECT * FROM invoices WHERE id=?", (iid,)).fetchone()
+            pays.append(record_payment(db, inv, inv["total"], today, "เงินสด"))
+        db.commit()
+        uids = [r[0] for r in db.execute("SELECT id FROM units ORDER BY id")]
+        pid2 = db.execute("SELECT id FROM payments WHERE receipt_no=?", (pays[1],)).fetchone()[0]
+    s.post(f"/admin/units/{uids[2]}/reset", {})          # ห้อง 26/3 (ใบเสร็จใบที่ 3)
+    s.post(f"/admin/payments/{pid2}/delete", {})         # ยกเลิกใบที่ 2
+    page = client.get(f"/admin/reports/daily?date={today}").get_data(as_text=True)
+    assert "ใบเสร็จวันนี้ (1 ใบ" in page
+    assert "ใบเสร็จที่ยกเลิก / ถูกล้าง (2 ใบ" in page and pays[1] in page and pays[2] in page
+    assert "ออกทั้งหมด 3 ใบ" in page
+    with app.app_context():
+        db = get_db()
+        assert b.next_number(db, "payments", "receipt_no", today) == f"0004/{today[5:7]}/{today[:4]}"
+        # ใบเสร็จที่ถูกลบไปก่อนมีที่เก็บ: กู้จากประวัติการใช้งาน และไม่ใช้เลขซ้ำ
+        db.execute("DELETE FROM payments_cancelled WHERE receipt_no=?", (pays[2],))
+        db.commit()
+        assert b.next_number(db, "payments", "receipt_no", today) == f"0004/{today[5:7]}/{today[:4]}"
+    page = client.get(f"/admin/reports/daily?date={today}").get_data(as_text=True)
+    assert pays[2] in page and "ถูกลบไปแล้ว (จากประวัติการใช้งาน)" in page
